@@ -116,7 +116,7 @@ pub fn synthesize_withdraw_update(prefix: TimedPrefix, metadata: UpdateMetadata)
         is_adj_rib_out: prefix.is_adj_rib_out,
         announced: false,
         synthetic: true,
-        
+
         // BGP Attributes - all empty/default for synthetic withdraws
         origin: "INCOMPLETE".to_string(),
         as_path: vec![],
@@ -183,14 +183,14 @@ pub async fn peer_up_withdraws_handler<T: StateStore>(
     )
     .increment(synthetic_updates.len() as u64);
 
-    let mut state_lock = state.lock().await;
-    for update in &mut synthetic_updates {
+    for update in &synthetic_updates {
         trace!("{:?}", update);
-
-        // Sent to the event pipeline
         tx.send(update.clone()).await?;
+    }
 
-        // Remove the update from the state
+    // Remove updates from state after sends complete; do not await while holding the lock.
+    let mut state_lock = state.lock().await;
+    for update in &synthetic_updates {
         state_lock
             .store
             .update(&update.router_addr, &metadata.peer_addr, update);
@@ -212,25 +212,33 @@ pub async fn process_updates<T: StateStore>(
 
     match state {
         Some(state) => {
-            // Stateful mode: deduplicate updates
-            let mut state_lock = state.lock().await;
-
-            for update in updates {
-                debug!("Processing update: {:?}", update);
-                let should_emit =
-                    state_lock.update(&update.router_addr, &update.peer_addr, &update)?;
-
-                if should_emit {
-                    trace!("Emitting update: {:?}", update);
-                    tx.send(update.clone()).await?;
-
-                    counter!(
-                        "risotto_tx_updates_total",
-                        "router" => update.router_addr.to_string(),
-                        "peer" => update.peer_addr.to_string(),
-                    )
-                    .increment(1);
+            // Gather emit candidates while locked.
+            let mut to_emit = Vec::new();
+            {
+                let mut state_lock = state.lock().await;
+                for update in updates {
+                    debug!("Processing update: {:?}", update);
+                    let should_emit =
+                        state_lock.update(&update.router_addr, &update.peer_addr, &update)?;
+                    if should_emit {
+                        to_emit.push(update);
+                    }
                 }
+            }
+
+            // Emit after lock release so slow channel sends cannot stall state updates.
+            for update in to_emit {
+                trace!("Emitting update: {:?}", update);
+                let router = update.router_addr.to_string();
+                let peer = update.peer_addr.to_string();
+                tx.send(update).await?;
+
+                counter!(
+                    "risotto_tx_updates_total",
+                    "router" => router,
+                    "peer" => peer,
+                )
+                .increment(1);
             }
         }
         None => {

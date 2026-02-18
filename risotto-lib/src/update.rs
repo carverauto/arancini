@@ -271,10 +271,9 @@ pub fn new_communities(communities: &[MetaCommunity]) -> Vec<(u32, u16)> {
 }
 
 pub fn map_to_ipv6(ip: IpAddr) -> IpAddr {
-    if ip.is_ipv4() {
-        format!("::ffff:{}", ip).parse().unwrap()
-    } else {
-        ip
+    match ip {
+        IpAddr::V4(v4) => IpAddr::V6(v4.to_ipv6_mapped()),
+        IpAddr::V6(v6) => IpAddr::V6(v6),
     }
 }
 

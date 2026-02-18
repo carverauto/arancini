@@ -17,10 +17,13 @@ pub async fn dump<T: StateStore + Serialize>(
     state: AsyncState<T>,
     cfg: CurationConfig,
 ) -> Result<()> {
-    let state_lock = state.lock().await;
     let temp_path = format!("{}.tmp", cfg.state_path);
+    let encoded = {
+        let state_lock = state.lock().await;
+        postcard::to_allocvec(&state_lock.store)
+    };
 
-    match postcard::to_allocvec(&state_lock.store) {
+    match encoded {
         Ok(encoded) => {
             match File::create(&temp_path).await {
                 Ok(mut file) => {

@@ -29,12 +29,12 @@ pub async fn peer_up_notification<T: StateStore>(
     _: PeerUpNotification,
 ) -> Result<()> {
     if let Some(state) = state {
-        let mut state_lock = state.lock().await;
-
-        // Add the peer to the state
-        state_lock
-            .add_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
-            .unwrap();
+        {
+            let mut state_lock = state.lock().await;
+            state_lock
+                .add_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
+                .unwrap();
+        }
 
         gauge!(
             "risotto_peer_established",
@@ -88,22 +88,21 @@ pub async fn peer_down_notification<T: StateStore>(
     _: PeerDownNotification,
 ) -> Result<()> {
     if let Some(state) = state {
-        // Remove the peer and the associated updates from the state
-        // We start by emiting synthetic withdraw updates
-        let mut state_lock = state.lock().await;
-
         let mut synthetic_updates = Vec::new();
-        let updates = state_lock
-            .get_updates_by_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
-            .unwrap();
-        for prefix in updates {
-            synthetic_updates.push(synthesize_withdraw_update(prefix.clone(), metadata.clone()));
-        }
+        {
+            // Gather updates and mutate state while locked, but do not await in this scope.
+            let mut state_lock = state.lock().await;
+            let updates = state_lock
+                .get_updates_by_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
+                .unwrap();
+            for prefix in updates {
+                synthetic_updates.push(synthesize_withdraw_update(prefix, metadata.clone()));
+            }
 
-        // Remove the peer from the state
-        state_lock
-            .remove_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
-            .unwrap();
+            state_lock
+                .remove_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
+                .unwrap();
+        }
 
         gauge!(
             "risotto_peer_established",
@@ -121,8 +120,6 @@ pub async fn peer_down_notification<T: StateStore>(
 
         for update in synthetic_updates {
             trace!("{:?}", update);
-
-            // Send the synthetic updates to the event pipeline
             tx.send(update).await?;
         }
     }

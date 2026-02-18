@@ -1,7 +1,11 @@
 use anyhow::Result;
+use futures::stream::{FuturesUnordered, StreamExt};
+use futures::FutureExt;
 use metrics::counter;
 use rdkafka::config::ClientConfig;
+use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::OwnedHeaders;
+use rdkafka::producer::future_producer::OwnedDeliveryResult;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use risotto_lib::update::Update;
 use std::time::Duration;
@@ -10,6 +14,8 @@ use tracing::{debug, error, trace};
 
 use crate::config::KafkaConfig;
 use crate::serializer::serialize_update;
+
+const MAX_IN_FLIGHT_BATCHES: usize = 64;
 
 #[derive(Clone)]
 pub struct SaslAuth {
@@ -43,6 +49,7 @@ pub async fn handle(config: &KafkaConfig, mut rx: Receiver<Update>) -> Result<()
         while let Some(_update) = rx.recv().await {
             // Just consume and drop
         }
+        return Ok(());
     }
 
     let kafka_brokers = config
@@ -74,10 +81,36 @@ pub async fn handle(config: &KafkaConfig, mut rx: Receiver<Update>) -> Result<()
     let producer: FutureProducer = client_config
         .create()
         .expect("Failed to create Kafka producer");
+    let mut in_flight = FuturesUnordered::new();
+
+    let record_delivery_status = |delivery_status: Result<
+        OwnedDeliveryResult,
+        futures::channel::oneshot::Canceled,
+    >| match delivery_status {
+        Ok(Ok(delivery)) => {
+            counter!("risotto_kafka_messages_total", "status" => "success").increment(1);
+            debug!(
+                "successfully sent message to partition {} at offset {}",
+                delivery.partition, delivery.offset
+            );
+        }
+        Ok(Err((error, _))) => {
+            counter!("risotto_kafka_messages_total", "status" => "failure").increment(1);
+            error!("failed to send message: {}", error);
+        }
+        Err(error) => {
+            counter!("risotto_kafka_messages_total", "status" => "failure").increment(1);
+            error!("delivery future cancelled: {}", error);
+        }
+    };
 
     // Send to Kafka
     let mut additional_message: Option<Vec<u8>> = None;
     loop {
+        while let Some(delivery_status) = in_flight.next().now_or_never().flatten() {
+            record_delivery_status(delivery_status);
+        }
+
         let start_time = std::time::Instant::now();
         let mut final_message = Vec::new();
         let mut n_messages = 0;
@@ -123,28 +156,39 @@ pub async fn handle(config: &KafkaConfig, mut rx: Receiver<Update>) -> Result<()
         }
 
         debug!("sending {} updates to Kafka", n_messages);
-        let delivery_status = producer
-            .send(
-                FutureRecord::to(config.topic.as_str())
-                    .payload(&final_message)
-                    .key("")
-                    .headers(OwnedHeaders::new()),
-                Duration::from_secs(0),
-            )
-            .await;
 
-        let metric_name = "risotto_kafka_messages_total";
-        match delivery_status {
-            Ok(delivery) => {
-                counter!(metric_name, "status" => "success").increment(1);
-                debug!(
-                    "successfully sent message to partition {} at offset {}",
-                    delivery.partition, delivery.offset
-                );
+        while in_flight.len() >= MAX_IN_FLIGHT_BATCHES {
+            if let Some(delivery_status) = in_flight.next().await {
+                record_delivery_status(delivery_status);
             }
-            Err((error, _)) => {
-                counter!(metric_name, "status" => "failure").increment(1);
-                error!("failed to send message: {}", error);
+        }
+
+        loop {
+            let record: FutureRecord<'_, (), _> = FutureRecord::to(config.topic.as_str())
+                .payload(&final_message)
+                .headers(OwnedHeaders::new());
+            match producer.send_result(record) {
+                Ok(delivery_future) => {
+                    in_flight.push(delivery_future);
+                    break;
+                }
+                Err((error, _))
+                    if matches!(
+                        error,
+                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
+                    ) =>
+                {
+                    if let Some(delivery_status) = in_flight.next().await {
+                        record_delivery_status(delivery_status);
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(config.batch_wait_interval)).await;
+                    }
+                }
+                Err((error, _)) => {
+                    counter!("risotto_kafka_messages_total", "status" => "failure").increment(1);
+                    error!("failed to enqueue message: {}", error);
+                    break;
+                }
             }
         }
     }

@@ -13,10 +13,10 @@ trap 'rm -f "$THROUGHPUT_OUT" "$ALLOC_OUT"' EXIT
 cd "$ROOT_DIR"
 
 echo "Running throughput benchmark (2.4)..."
-cargo run --release -p risotto --bin arancini_bench -- throughput >"$THROUGHPUT_OUT"
+cargo run --release -p arancini --bin arancini_bench -- throughput >"$THROUGHPUT_OUT"
 
 echo "Running allocation benchmark (2.5)..."
-cargo run --release -p risotto --bin arancini_bench -- alloc >"$ALLOC_OUT"
+cargo run --release -p arancini --bin arancini_bench -- alloc >"$ALLOC_OUT"
 
 THROUGHPUT_CHECK=$(
   awk -F',' '

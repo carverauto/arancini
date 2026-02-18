@@ -41,8 +41,8 @@ CREATE TABLE bmp.from_kafka
 ENGINE = Kafka()
 SETTINGS
     kafka_broker_list = '10.0.0.100:9092',
-    kafka_topic_list = 'risotto-updates',
-    kafka_group_name = 'clickhouse-risotto-group',
+    kafka_topic_list = 'arancini-updates',
+    kafka_group_name = 'clickhouse-arancini-group',
     kafka_format = 'CapnProto',
     kafka_schema = 'update.capnp:Update',
     kafka_max_rows_per_message = 1048576;

@@ -14,12 +14,12 @@ use monoio::io::AsyncReadRent;
 use monoio::net::{ListenerOpts, TcpListener, TcpStream};
 use monoio::time::sleep;
 use monoio::{FusionDriver, RuntimeBuilder};
-use risotto_lib::processor::decode_bmp_message;
-use risotto_lib::sender::UpdateSender;
-use risotto_lib::state::{synthesize_withdraw_update, State};
-use risotto_lib::state_store::memory::MemoryStore;
-use risotto_lib::state_store::store::StateStore;
-use risotto_lib::update::{decode_updates, new_metadata, Update, UpdateMetadata};
+use arancini_lib::processor::decode_bmp_message;
+use arancini_lib::sender::UpdateSender;
+use arancini_lib::state::{synthesize_withdraw_update, State};
+use arancini_lib::state_store::memory::MemoryStore;
+use arancini_lib::state_store::store::StateStore;
+use arancini_lib::update::{decode_updates, new_metadata, Update, UpdateMetadata};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -1417,7 +1417,7 @@ mod tests {
     use super::*;
     use bgpkit_parser::bmp::messages::PeerDownReason;
     use chrono::Utc;
-    use risotto_lib::update::{UpdateAttributes, UpdateMetadata};
+    use arancini_lib::update::{UpdateAttributes, UpdateMetadata};
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::{Notify, Semaphore};
@@ -1489,12 +1489,12 @@ mod tests {
         let update = Update {
             time_received_ns: Utc::now(),
             time_bmp_header_ns: Utc::now(),
-            router_addr: risotto_lib::update::map_to_ipv6(metadata.router_socket.ip()),
+            router_addr: arancini_lib::update::map_to_ipv6(metadata.router_socket.ip()),
             router_port: metadata.router_socket.port(),
-            peer_addr: risotto_lib::update::map_to_ipv6(metadata.peer_addr),
+            peer_addr: arancini_lib::update::map_to_ipv6(metadata.peer_addr),
             peer_bgp_id: metadata.peer_bgp_id,
             peer_asn: metadata.peer_asn,
-            prefix_addr: risotto_lib::update::map_to_ipv6(IpAddr::V4(Ipv4Addr::new(
+            prefix_addr: arancini_lib::update::map_to_ipv6(IpAddr::V4(Ipv4Addr::new(
                 203, 0, 113, 0,
             ))),
             prefix_len: 24,

@@ -86,7 +86,7 @@ pub struct CurationConfig {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Risotto BGP Monitoring Protocol (BMP) collector", long_about = None)]
+#[command(author, version, about = "Arancini BGP Monitoring Protocol (BMP) collector", long_about = None)]
 pub struct Cli {
     /// Number of monoio worker threads used by Arancini runtime mode
     #[arg(long, default_value_t = num_cpus::get())]
@@ -129,7 +129,7 @@ pub struct Cli {
     pub kafka_disable: bool,
 
     /// Kafka producer topic
-    #[arg(long, default_value = "risotto-updates")]
+    #[arg(long, default_value = "arancini-updates")]
     pub kafka_topic: String,
 
     /// Kafka Authentication Protocol (e.g., PLAINTEXT, SASL_PLAINTEXT)
@@ -137,11 +137,11 @@ pub struct Cli {
     pub kafka_auth_protocol: String,
 
     /// Kafka Authentication SASL Username
-    #[arg(long, default_value = "risotto")]
+    #[arg(long, default_value = "arancini")]
     pub kafka_auth_sasl_username: String,
 
     /// Kafka Authentication SASL Password
-    #[arg(long, default_value = "risotto")]
+    #[arg(long, default_value = "arancini")]
     pub kafka_auth_sasl_password: String,
 
     /// Kafka Authentication SASL Mechanism (e.g., PLAIN, SCRAM-SHA-512)

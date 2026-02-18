@@ -78,7 +78,7 @@ docker compose -f integration/compose.yml up -d --build
 
 ---
 
-Refer to the Docker Compose [integration](./integration/) tests to try Arancini locally. The setup includes BIRD and GoBGP routers announcing BGP updates between them, and transmitting BMP messages to Risotto.
+Refer to the Docker Compose [integration](./integration/) tests to try Arancini locally. The setup includes BIRD and GoBGP routers announcing BGP updates between them, and transmitting BMP messages to Arancini.
 
 ## Linux Performance Validation
 
@@ -116,13 +116,13 @@ Arancini supports TLS and mutual TLS for the NATS JetStream sidecar path.
 Example:
 
 ```bash
-./target/release/risotto \
+./target/release/arancini \
   --nats-enable \
   --nats-server nats://nats.example.net:4222 \
   --nats-tls-required \
-  --nats-tls-ca-cert-path /etc/risotto/nats/ca.pem \
-  --nats-tls-client-cert-path /etc/risotto/nats/client.pem \
-  --nats-tls-client-key-path /etc/risotto/nats/client-key.pem
+  --nats-tls-ca-cert-path /etc/arancini/nats/ca.pem \
+  --nats-tls-client-cert-path /etc/arancini/nats/client.pem \
+  --nats-tls-client-key-path /etc/arancini/nats/client-key.pem
 ```
 
 Optional:

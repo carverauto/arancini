@@ -96,6 +96,55 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
+name = "arancini"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "arancini-lib",
+ "async-nats",
+ "bgpkit-parser",
+ "bytes",
+ "capnp",
+ "capnpc",
+ "chrono",
+ "clap",
+ "clap-verbosity-flag",
+ "core_affinity",
+ "crossfire",
+ "futures",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "monoio",
+ "num_cpus",
+ "postcard",
+ "rdkafka",
+ "rustls",
+ "serde",
+ "serde_json",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-graceful",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "arancini-lib"
+version = "0.7.0"
+dependencies = [
+ "ahash",
+ "anyhow",
+ "bgpkit-parser",
+ "bytes",
+ "chrono",
+ "metrics",
+ "rand 0.9.2",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "async-nats"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2321,55 +2370,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "risotto"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "async-nats",
- "bgpkit-parser",
- "bytes",
- "capnp",
- "capnpc",
- "chrono",
- "clap",
- "clap-verbosity-flag",
- "core_affinity",
- "crossfire",
- "futures",
- "metrics",
- "metrics-exporter-prometheus",
- "monoio",
- "num_cpus",
- "postcard",
- "rdkafka",
- "risotto-lib",
- "rustls",
- "serde",
- "serde_json",
- "socket2 0.5.10",
- "tokio",
- "tokio-graceful",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "risotto-lib"
-version = "0.7.0"
-dependencies = [
- "ahash",
- "anyhow",
- "bgpkit-parser",
- "bytes",
- "chrono",
- "metrics",
- "rand 0.9.2",
- "serde",
- "tokio",
- "tracing",
 ]
 
 [[package]]

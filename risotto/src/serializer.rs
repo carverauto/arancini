@@ -2,7 +2,7 @@ use capnp::message::Builder;
 use capnp::serialize;
 use std::net::IpAddr;
 
-use risotto_lib::update::Update;
+use arancini_lib::update::Update;
 
 use crate::update_capnp::update;
 

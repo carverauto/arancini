@@ -7,7 +7,7 @@ use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::future_producer::OwnedDeliveryResult;
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use risotto_lib::update::Update;
+use arancini_lib::update::Update;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tracing::{debug, error, trace};

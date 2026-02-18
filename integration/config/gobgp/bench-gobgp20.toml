@@ -1,0 +1,28 @@
+[global.config]
+    as = 65020
+    router-id = "10.0.0.20"
+
+[[bmp-servers]]
+    [bmp-servers.config]
+        address = "10.0.0.99"
+        port = 4000
+        route-monitoring-policy = "all"
+        statistics-timeout = 600
+
+[[neighbors]]
+    [neighbors.config]
+        neighbor-address = "10.0.0.10"
+        peer-as = 65010
+
+    [[neighbors.afi-safis]]
+        [neighbors.afi-safis.config]
+        afi-safi-name = "ipv4-unicast"
+
+[[neighbors]]
+    [neighbors.config]
+        neighbor-address = "10.0.0.50"
+        peer-as = 65050
+
+    [[neighbors.afi-safis]]
+        [neighbors.afi-safis.config]
+        afi-safi-name = "ipv4-unicast"

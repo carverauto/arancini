@@ -207,6 +207,12 @@ ARANCINI_WORKERS="${ARANCINI_WORKERS:-4}"
 run_profile "risotto" "risotto" "$ARANCINI_WORKERS" "18083"
 run_profile "arancini" "arancini" "$ARANCINI_WORKERS" "18084"
 
+if [[ "${RX_DELTA[risotto]}" == "0" || "${RX_DELTA[arancini]}" == "0" ]]; then
+  echo "invalid benchmark: rx_update delta is zero for at least one runtime profile" >&2
+  echo "this workload is not exercising the update-processing fast path; adjust traffic generation" >&2
+  exit 2
+fi
+
 bmp_speedup="n/a"
 if awk "BEGIN{exit !(${BMP_RATE[risotto]} > 0)}"; then
   bmp_speedup="$(awk "BEGIN{printf \"%.2fx\", ${BMP_RATE[arancini]}/${BMP_RATE[risotto]}}")"

@@ -6,17 +6,11 @@ use tokio::sync::mpsc::Sender;
 use crate::update::Update;
 
 pub trait UpdateSender: Clone + Send + Sync + 'static {
-    fn send<'a>(
-        &'a self,
-        update: Update,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn send<'a>(&'a self, update: Update) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }
 
 impl UpdateSender for Sender<Update> {
-    fn send<'a>(
-        &'a self,
-        update: Update,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn send<'a>(&'a self, update: Update) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
             self.send(update)
                 .await

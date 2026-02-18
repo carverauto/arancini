@@ -99,11 +99,6 @@ async fn bmp_handler<T: StateStore>(
 }
 
 async fn arancini_handler(cfg: Arc<AppConfig>, tx: BridgeSender) {
-    if cfg.curation.enabled {
-        error!("arancini runtime currently requires curation to be disabled (--curation-disable)");
-        return;
-    }
-
     if let Err(err) = arancini::spawn_workers(cfg, tx) {
         error!("failed to spawn arancini workers: {}", err);
         return;
@@ -137,8 +132,14 @@ async fn main() -> Result<()> {
     let curation_config = cfg.curation.clone();
     let shutdown: Shutdown = Shutdown::default();
 
-    // Initialize curation state if enabled
-    let state = if curation_config.enabled {
+    // Initialize legacy global curation state only for classic runtime mode.
+    let use_legacy_global_state =
+        cfg.runtime.mode == RuntimeMode::Risotto && curation_config.enabled;
+    if cfg.runtime.mode == RuntimeMode::Arancini && curation_config.enabled {
+        debug!("arancini curation enabled with per-worker shard state");
+    }
+
+    let state = if use_legacy_global_state {
         debug!("curation is enabled");
         let store = MemoryStore::new();
         let state = new_state(store);
@@ -154,20 +155,33 @@ async fn main() -> Result<()> {
     let (producer_tx, rx) = channel(cfg.kafka.mpsc_buffer_size);
 
     // Initialize tasks
+    let nats_enabled_for_arancini = cfg.runtime.mode == RuntimeMode::Arancini && cfg.nats.enabled;
     let ingress_task = if cfg.runtime.mode == RuntimeMode::Arancini {
-        let (bridge_tx, bridge_rx) = bridge::bounded_channel(cfg.runtime.arancini_bridge_buffer_size);
+        let (bridge_tx, bridge_rx) =
+            bridge::bounded_channel(cfg.runtime.arancini_bridge_buffer_size);
         if let Some(capacity) = bridge_tx.queue_capacity() {
             debug!("arancini bridge queue capacity set to {}", capacity);
         }
-        if let Err(err) = bridge::spawn_sidecar_thread(bridge_rx, producer_tx.clone()) {
-            anyhow::bail!("failed to start arancini sidecar thread: {}", err);
+        if cfg.nats.enabled {
+            if let Err(err) = bridge::spawn_nats_sidecar_thread(bridge_rx, cfg.nats.clone()) {
+                anyhow::bail!("failed to start arancini NATS sidecar thread: {}", err);
+            }
+        } else {
+            warn!("arancini running without NATS sidecar enabled; using Kafka forwarder bridge");
+            if let Err(err) = bridge::spawn_sidecar_thread(bridge_rx, producer_tx.clone()) {
+                anyhow::bail!("failed to start arancini sidecar thread: {}", err);
+            }
         }
 
         shutdown.spawn_task(arancini_handler(cfg.clone(), bridge_tx))
     } else {
         shutdown.spawn_task(bmp_handler(state.clone(), cfg.clone(), producer_tx.clone()))
     };
-    let producer_task = shutdown.spawn_task(producer_handler(cfg.clone(), rx));
+    let producer_task = if nats_enabled_for_arancini {
+        shutdown.spawn_task(async { pending::<()>().await })
+    } else {
+        shutdown.spawn_task(producer_handler(cfg.clone(), rx))
+    };
     tokio::select! {
         biased;
         _ = shutdown.shutdown_with_limit(Duration::from_secs(1)) => {}

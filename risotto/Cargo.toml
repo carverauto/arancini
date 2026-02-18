@@ -13,8 +13,10 @@ exclude.workspace = true
 
 [dependencies]
 anyhow = "1.0.95"
+async-nats = "0.39.0"
 postcard = { version = "1.0", features = ["alloc"] }
 bytes = "1.9.0"
+bgpkit-parser = { version = "0.15.0", features = ["serde"] }
 capnp = "0.25.0"
 chrono = "0.4.40"
 clap = { version = "4.5.23", features = ["derive"] }

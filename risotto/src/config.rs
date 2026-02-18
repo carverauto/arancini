@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub runtime: RuntimeConfig,
     pub bmp: BMPConfig,
     pub kafka: KafkaConfig,
+    pub nats: NatsConfig,
     pub curation: CurationConfig,
 }
 
@@ -51,6 +52,14 @@ pub struct KafkaConfig {
     pub batch_wait_time: u64,
     pub batch_wait_interval: u64,
     pub mpsc_buffer_size: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct NatsConfig {
+    pub enabled: bool,
+    pub server: String,
+    pub subject: String,
+    pub max_in_flight_acks: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +155,22 @@ pub struct Cli {
     /// Kafka MPSC bufer size
     #[arg(long, default_value_t = 100000)]
     pub kafka_mpsc_buffer_size: usize,
+
+    /// Enable NATS JetStream sidecar publishing path (Arancini mode)
+    #[arg(long)]
+    pub nats_enable: bool,
+
+    /// NATS server URL
+    #[arg(long, default_value = "nats://127.0.0.1:4222")]
+    pub nats_server: String,
+
+    /// NATS JetStream publish base subject prefix
+    #[arg(long, default_value = "arancini.updates")]
+    pub nats_subject: String,
+
+    /// Max number of in-flight JetStream ACK futures handled by sidecar
+    #[arg(long, default_value_t = 4096)]
+    pub nats_max_in_flight_acks: usize,
 
     /// Metrics listener address (IP or FQDN) for Prometheus endpoint
     #[arg(long, default_value = "0.0.0.0:8080")]
@@ -256,6 +281,30 @@ fn set_metrics(metrics_address: SocketAddr) {
         "risotto_arancini_bridge_queue_fill_ratio",
         "Current fill ratio of the Arancini monoio->tokio bridge queue"
     );
+    metrics::describe_counter!(
+        "risotto_arancini_nats_publish_enqueued_total",
+        "Total number of updates enqueued for JetStream publish"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_nats_publish_errors_total",
+        "Total number of JetStream publish enqueue errors"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_nats_ack_success_total",
+        "Total number of successful JetStream publish acknowledgements"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_nats_ack_failure_total",
+        "Total number of failed JetStream publish acknowledgements"
+    );
+    metrics::describe_gauge!(
+        "risotto_arancini_nats_ack_inflight",
+        "Current number of in-flight JetStream publish acknowledgements"
+    );
+    metrics::describe_histogram!(
+        "risotto_arancini_nats_ack_lag_seconds",
+        "Elapsed seconds from publish enqueue to JetStream acknowledgement"
+    );
 }
 
 pub async fn resolve_address(address: String) -> Result<SocketAddr> {
@@ -320,6 +369,12 @@ pub async fn configure() -> Result<AppConfig> {
             batch_wait_time: cli.kafka_batch_wait_time,
             batch_wait_interval: cli.kafka_batch_wait_interval,
             mpsc_buffer_size: cli.kafka_mpsc_buffer_size,
+        },
+        nats: NatsConfig {
+            enabled: cli.nats_enable,
+            server: cli.nats_server,
+            subject: cli.nats_subject,
+            max_in_flight_acks: cli.nats_max_in_flight_acks,
         },
         curation: CurationConfig {
             enabled: !cli.curation_disable,

@@ -1,22 +1,32 @@
 use anyhow::Result;
+use bgpkit_parser::bmp::messages::{PeerDownNotification, RouteMonitoring};
+use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
 use bytes::BytesMut;
 use metrics::counter;
+use metrics::gauge;
 use monoio::io::AsyncReadRent;
 use monoio::net::{ListenerOpts, TcpListener, TcpStream};
+use monoio::time::sleep;
 use monoio::{FusionDriver, RuntimeBuilder};
-use risotto_lib::process_bmp_message;
+use risotto_lib::processor::decode_bmp_message;
 use risotto_lib::sender::UpdateSender;
+use risotto_lib::state::{synthesize_withdraw_update, State};
 use risotto_lib::state_store::memory::MemoryStore;
-use std::collections::HashMap;
+use risotto_lib::state_store::store::StateStore;
+use risotto_lib::update::{decode_updates, new_metadata, Update, UpdateMetadata};
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::config::{AppConfig, BMPConfig};
 
 const BMP_COMMON_HEADER_LEN: usize = 6;
 const BMP_MAX_MESSAGE_TYPE: u8 = 6;
+type WorkerShardState = Arc<Mutex<State<MemoryStore>>>;
 
 #[derive(Debug, Clone, Copy)]
 struct SessionOwnerEntry {
@@ -288,6 +298,7 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
         anyhow::bail!("arancini runtime requires at least one worker thread");
     }
     let bmp_config = cfg.bmp.clone();
+    let curation_enabled = cfg.curation.enabled;
     let ownership = SessionOwnerRegistry::default();
 
     let core_ids = core_affinity::get_core_ids();
@@ -320,7 +331,9 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
                 };
 
                 runtime.block_on(async move {
-                    if let Err(err) = worker_loop(worker_id, bmp_config, tx, ownership).await {
+                    if let Err(err) =
+                        worker_loop(worker_id, bmp_config, tx, ownership, curation_enabled).await
+                    {
                         error!("arancini worker {} failed: {}", worker_id, err);
                     }
                 });
@@ -335,6 +348,7 @@ async fn worker_loop<S: UpdateSender>(
     cfg: BMPConfig,
     tx: S,
     ownership: SessionOwnerRegistry,
+    curation_enabled: bool,
 ) -> Result<()> {
     // SO_REUSEPORT is enabled to let the kernel spread accepted sessions across workers.
     let mut opts = ListenerOpts::new()
@@ -346,6 +360,17 @@ async fn worker_loop<S: UpdateSender>(
     }
     let listener = TcpListener::bind_with_config(cfg.host, &opts)?;
     info!("arancini worker {} listening on {}", worker_id, cfg.host);
+    let shard = if curation_enabled {
+        Some(Arc::new(Mutex::new(State::new(MemoryStore::new()))))
+    } else {
+        None
+    };
+    if curation_enabled {
+        debug!(
+            "arancini worker {} enabled local shard curation state",
+            worker_id
+        );
+    }
 
     loop {
         let (stream, socket) = listener.accept().await?;
@@ -373,9 +398,10 @@ async fn worker_loop<S: UpdateSender>(
 
         let tx = tx.clone();
         let conn_cfg = cfg.clone();
+        let shard = shard.clone();
         monoio::spawn(async move {
             if let Err(err) =
-                handle_connection(stream, socket, conn_cfg, tx, worker_id, owner_guard).await
+                handle_connection(stream, socket, conn_cfg, tx, worker_id, owner_guard, shard).await
             {
                 error!("arancini connection {} failed: {}", socket, err);
             }
@@ -390,6 +416,7 @@ async fn handle_connection<S: UpdateSender>(
     tx: S,
     worker_id: usize,
     owner_guard: SessionOwnerGuard,
+    shard: Option<WorkerShardState>,
 ) -> Result<()> {
     owner_guard.assert_owner()?;
     let mut alloc_stats = IngestAllocationStats::default();
@@ -444,9 +471,13 @@ async fn handle_connection<S: UpdateSender>(
                 break;
             }
 
-            trace!("{}: arancini read BMP packet ({} bytes)", socket, packet_length);
+            trace!(
+                "{}: arancini read BMP packet ({} bytes)",
+                socket,
+                packet_length
+            );
             let mut bytes = frame_buffer.split_to(packet_length).freeze();
-            process_bmp_message::<MemoryStore, S>(None, tx.clone(), socket, &mut bytes).await?;
+            process_bmp_message_shard(shard.clone(), tx.clone(), socket, &mut bytes).await?;
         }
 
         if frame_buffer.len() > cfg.arancini_max_frame_size_bytes {
@@ -467,6 +498,223 @@ async fn handle_connection<S: UpdateSender>(
         "{}: arancini session ownership released for worker {}",
         socket, worker_id
     );
+
+    Ok(())
+}
+
+fn lock_worker_shard(
+    shard: &WorkerShardState,
+) -> Result<std::sync::MutexGuard<'_, State<MemoryStore>>> {
+    shard
+        .lock()
+        .map_err(|_| anyhow::anyhow!("worker shard state lock poisoned"))
+}
+
+fn curate_updates_in_shard(shard: &WorkerShardState, updates: Vec<Update>) -> Result<Vec<Update>> {
+    let mut to_emit = Vec::new();
+    let mut state = lock_worker_shard(shard)?;
+    for update in updates {
+        if state.update(&update.router_addr, &update.peer_addr, &update)? {
+            to_emit.push(update);
+        }
+    }
+    Ok(to_emit)
+}
+
+async fn process_route_monitoring_shard<S: UpdateSender>(
+    shard: Option<WorkerShardState>,
+    tx: S,
+    metadata: UpdateMetadata,
+    body: RouteMonitoring,
+) -> Result<()> {
+    let updates = decode_updates(body, metadata).unwrap_or_default();
+    counter!("risotto_rx_updates_total").increment(updates.len() as u64);
+
+    if updates.is_empty() {
+        return Ok(());
+    }
+
+    let to_emit = match shard {
+        Some(shard) => curate_updates_in_shard(&shard, updates)?,
+        None => updates,
+    };
+
+    for update in to_emit {
+        tx.send(update).await?;
+        counter!("risotto_tx_updates_total").increment(1);
+    }
+
+    Ok(())
+}
+
+async fn process_peer_up_shard<S: UpdateSender>(
+    shard: Option<WorkerShardState>,
+    tx: S,
+    metadata: UpdateMetadata,
+) -> Result<()> {
+    if let Some(shard) = shard {
+        {
+            let mut state = lock_worker_shard(&shard)?;
+            state.add_peer(&metadata.router_socket.ip(), &metadata.peer_addr)?;
+        }
+
+        gauge!(
+            "risotto_peer_established",
+            "router" => metadata.router_socket.ip().to_string(),
+            "peer" => metadata.peer_addr.to_string()
+        )
+        .set(1);
+
+        let spawn_shard = shard.clone();
+        let spawn_tx = tx.clone();
+        monoio::spawn(async move {
+            if let Err(err) =
+                peer_up_withdraws_handler_shard(spawn_shard, spawn_tx, metadata, 300).await
+            {
+                error!("arancini peer_up stale-withdraw handler failed: {}", err);
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn peer_up_withdraws_handler_shard<S: UpdateSender>(
+    shard: WorkerShardState,
+    tx: S,
+    metadata: UpdateMetadata,
+    sleep_time: u64,
+) -> Result<()> {
+    let startup = chrono::Utc::now();
+    sleep(Duration::from_secs(sleep_time)).await;
+
+    let stale_prefixes = {
+        let state = lock_worker_shard(&shard)?;
+        state
+            .store
+            .get_updates_by_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
+            .into_iter()
+            .filter(|timed_prefix| timed_prefix.timestamp < startup.timestamp_millis())
+            .collect::<Vec<_>>()
+    };
+
+    counter!("risotto_tx_updates_total").increment(stale_prefixes.len() as u64);
+
+    for prefix in &stale_prefixes {
+        let update = synthesize_withdraw_update(prefix, metadata.clone());
+        tx.send(update).await?;
+    }
+
+    {
+        let mut state = lock_worker_shard(&shard)?;
+        for prefix in &stale_prefixes {
+            let update = synthesize_withdraw_update(prefix, metadata.clone());
+            state
+                .store
+                .update(&update.router_addr, &metadata.peer_addr, &update);
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_peer_down_shard<S: UpdateSender>(
+    shard: Option<WorkerShardState>,
+    tx: S,
+    metadata: UpdateMetadata,
+    _: PeerDownNotification,
+) -> Result<()> {
+    if let Some(shard) = shard {
+        let synthetic_updates = {
+            let mut state = lock_worker_shard(&shard)?;
+            let prefixes =
+                state.get_updates_by_peer(&metadata.router_socket.ip(), &metadata.peer_addr)?;
+            let synthetic_updates = prefixes
+                .into_iter()
+                .map(|prefix| synthesize_withdraw_update(&prefix, metadata.clone()))
+                .collect::<Vec<_>>();
+            state.remove_peer(&metadata.router_socket.ip(), &metadata.peer_addr)?;
+            synthetic_updates
+        };
+
+        gauge!(
+            "risotto_peer_established",
+            "router" => metadata.router_socket.ip().to_string(),
+            "peer" => metadata.peer_addr.to_string()
+        )
+        .set(0);
+
+        counter!("risotto_tx_updates_total").increment(synthetic_updates.len() as u64);
+        for update in synthetic_updates {
+            tx.send(update).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_bmp_message_shard<S: UpdateSender>(
+    shard: Option<WorkerShardState>,
+    tx: S,
+    socket: SocketAddr,
+    bytes: &mut bytes::Bytes,
+) -> Result<()> {
+    let message = decode_bmp_message(bytes).map_err(|err| anyhow::anyhow!("{}", err))?;
+    trace!("{} - {:?}", socket, message);
+    let metadata = new_metadata(socket, &message);
+
+    let metric_name = "risotto_bmp_messages_total";
+    match message.message_body {
+        BmpMessageBody::InitiationMessage(body) => {
+            trace!("{}: {:?}", socket, body);
+            counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "initiation")
+                .increment(1);
+        }
+        BmpMessageBody::PeerUpNotification(body) => {
+            trace!("{}: {:?}", socket, body);
+            let metadata = metadata.ok_or_else(|| {
+                anyhow::anyhow!("{}: PeerUpNotification: no per-peer header", socket)
+            })?;
+            counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_up_notification")
+                .increment(1);
+            process_peer_up_shard(shard, tx, metadata).await?;
+        }
+        BmpMessageBody::RouteMonitoring(body) => {
+            trace!("{}: {:?}", socket, body);
+            let metadata = metadata.ok_or_else(|| {
+                anyhow::anyhow!("{}: RouteMonitoring: no per-peer header", socket)
+            })?;
+            if !metadata.peer_addr.is_unspecified() {
+                counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "route_monitoring")
+                    .increment(1);
+                process_route_monitoring_shard(shard, tx, metadata, body).await?;
+            }
+        }
+        BmpMessageBody::RouteMirroring(body) => {
+            trace!("{}: {:?}", socket, body);
+            counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "route_mirroring")
+                .increment(1);
+        }
+        BmpMessageBody::PeerDownNotification(body) => {
+            trace!("{}: {:?}", socket, body);
+            let metadata = metadata.ok_or_else(|| {
+                anyhow::anyhow!("{}: PeerDownNotification: no per-peer header", socket)
+            })?;
+            counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_down_notification")
+                .increment(1);
+            process_peer_down_shard(shard, tx, metadata, body).await?;
+        }
+        BmpMessageBody::TerminationMessage(body) => {
+            trace!("{}: {:?}", socket, body);
+            counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "termination")
+                .increment(1);
+        }
+        BmpMessageBody::StatsReport(body) => {
+            trace!("{}: {:?}", socket, body);
+            counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "stats_report")
+                .increment(1);
+        }
+    }
 
     Ok(())
 }

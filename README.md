@@ -18,7 +18,7 @@ Arancini is a high-performance fork of [Risotto](https://github.com/nxthdr/risot
 
 The fastest way to deploy Arancini is via Docker. The following command displays the help menu:
 ```bash
-docker run ghcr.io/nxthdr/arancini:main --help
+docker run ghcr.io/carverauto/arancini:main --help
 ```
 
 To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
@@ -26,7 +26,7 @@ To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
 docker run \
   -p 4000:4000 \
   -p 8080:8080 \
-  ghcr.io/nxthdr/arancini:main
+  ghcr.io/carverauto/arancini:main
 ```
 
 Monitoring is available via the Prometheus endpoint at `http://localhost:8080/metrics`.

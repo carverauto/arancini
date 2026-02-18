@@ -96,14 +96,14 @@ check_triplet_third_min() {
   echo
   echo "## Runtime Socket Enforcement (Source Validation)"
   echo
-  check_source_pattern "$ROOT_DIR/risotto/src/main.rs" "set_reuse_port\\(true\\)" "Tokio BMP listener enables SO_REUSEPORT"
-  check_source_pattern "$ROOT_DIR/risotto/src/main.rs" "listen\\(cfg\\.listener_backlog\\)" "Tokio BMP listener applies runtime-configurable backlog"
-  check_source_pattern "$ROOT_DIR/risotto/src/main.rs" "set_recv_buffer_size\\(recv_buf_size\\)" "Tokio BMP path applies configurable SO_RCVBUF"
-  check_source_pattern "$ROOT_DIR/risotto/src/main.rs" "set_nodelay\\(true\\)" "Tokio accepted sessions enable TCP_NODELAY"
-  check_source_pattern "$ROOT_DIR/risotto/src/arancini.rs" "reuse_port\\(true\\)" "Arancini listener enables SO_REUSEPORT"
-  check_source_pattern "$ROOT_DIR/risotto/src/arancini.rs" "backlog\\(cfg\\.listener_backlog\\)" "Arancini listener applies runtime-configurable backlog"
-  check_source_pattern "$ROOT_DIR/risotto/src/arancini.rs" "recv_buf_size\\(recv_buf_size\\)" "Arancini listener applies configurable SO_RCVBUF"
-  check_source_pattern "$ROOT_DIR/risotto/src/arancini.rs" "set_nodelay\\(true\\)" "Arancini accepted sessions enable TCP_NODELAY"
+  check_source_pattern "$ROOT_DIR/arancini/src/main.rs" "set_reuse_port\\(true\\)" "Tokio BMP listener enables SO_REUSEPORT"
+  check_source_pattern "$ROOT_DIR/arancini/src/main.rs" "listen\\(cfg\\.listener_backlog\\)" "Tokio BMP listener applies runtime-configurable backlog"
+  check_source_pattern "$ROOT_DIR/arancini/src/main.rs" "set_recv_buffer_size\\(recv_buf_size\\)" "Tokio BMP path applies configurable SO_RCVBUF"
+  check_source_pattern "$ROOT_DIR/arancini/src/main.rs" "set_nodelay\\(true\\)" "Tokio accepted sessions enable TCP_NODELAY"
+  check_source_pattern "$ROOT_DIR/arancini/src/arancini.rs" "reuse_port\\(true\\)" "Arancini listener enables SO_REUSEPORT"
+  check_source_pattern "$ROOT_DIR/arancini/src/arancini.rs" "backlog\\(cfg\\.listener_backlog\\)" "Arancini listener applies runtime-configurable backlog"
+  check_source_pattern "$ROOT_DIR/arancini/src/arancini.rs" "recv_buf_size\\(recv_buf_size\\)" "Arancini listener applies configurable SO_RCVBUF"
+  check_source_pattern "$ROOT_DIR/arancini/src/arancini.rs" "set_nodelay\\(true\\)" "Arancini accepted sessions enable TCP_NODELAY"
   echo
   echo "- Source enforcement status: **$SOURCE_STATUS**"
   echo

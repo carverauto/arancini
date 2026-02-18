@@ -25,13 +25,13 @@ Recent hot-path analysis also identified immediate throughput collapse risks in 
   - `deployment-performance-tuning`
   - `hot-path-hardening`
 - Affected code (expected):
-  - `risotto/src/main.rs`
-  - `risotto/src/bmp.rs`
-  - `risotto/src/producer.rs` (replacement with NATS bridge/publisher path)
-  - `risotto/src/config.rs`
-  - `risotto/src/serializer.rs`
-  - `risotto-lib/src/state.rs`
-  - `risotto-lib/src/state_store/*` (sharding changes)
+  - `arancini/src/main.rs`
+  - `arancini/src/bmp.rs`
+  - `arancini/src/producer.rs` (replacement with NATS bridge/publisher path)
+  - `arancini/src/config.rs`
+  - `arancini/src/serializer.rs`
+  - `arancini-lib/src/state.rs`
+  - `arancini-lib/src/state_store/*` (sharding changes)
   - new runtime/bridge modules for monoio workers and Tokio sidecar
 - Operational impact:
   - Linux host tuning is now mandatory for target performance profile.

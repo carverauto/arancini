@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["risotto", "risotto-lib"]
+members = ["arancini", "arancini-lib"]
 
 [workspace.package]
 version = "0.7.0"

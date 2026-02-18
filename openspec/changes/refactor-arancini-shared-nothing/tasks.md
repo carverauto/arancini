@@ -22,7 +22,7 @@
 - [x] 1.5 Implement NATS JetStream async publish path with non-blocking ACK handling and error metrics.
 - [x] 1.6 Implement subject routing schema `arancini.updates.<router_ip>.<peer_asn>.<afi_safi>`.
 - [x] 1.7 Replace global curation lock path with per-core sharded RIB state and local dedup/synthetic-withdraw processing.
-- [ ] 1.8 Implement periodic per-core snapshot persistence and startup restore (NATS KV bucket or NVMe store).
+- [x] 1.8 Implement periodic per-core snapshot persistence and startup restore (NATS KV bucket or NVMe store).
 - [ ] 1.9 Implement Cap'n Proto direct-to-buffer serialization path and remove avoidable hot-path allocations.
 - [x] 1.10 Apply required socket options (`SO_REUSEPORT`, `TCP_NODELAY`) in runtime socket setup.
 - [x] 1.13 Add runtime-configurable listener backlog and ingest `SO_RCVBUF` controls; align defaults with documented host tuning.

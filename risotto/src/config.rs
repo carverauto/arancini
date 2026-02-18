@@ -21,6 +21,19 @@ pub enum RuntimeMode {
     Arancini,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SnapshotBackendArg {
+    Auto,
+    Local,
+    NatsKv,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotBackend {
+    Local,
+    NatsKv,
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub mode: RuntimeMode,
@@ -67,6 +80,10 @@ pub struct CurationConfig {
     pub enabled: bool,
     pub state_path: String,
     pub state_save_interval: u64,
+    pub snapshot_backend: SnapshotBackend,
+    pub snapshot_nats_kv_bucket: String,
+    pub snapshot_nats_object_store_bucket: String,
+    pub snapshot_sidecar_buffer_size: usize,
 }
 
 #[derive(Parser, Debug)]
@@ -189,6 +206,23 @@ pub struct Cli {
     #[arg(long, default_value_t = 10)]
     pub curation_state_interval: u64,
 
+    /// Snapshot backend mode for Arancini worker shard persistence
+    /// "auto" selects NATS KV/Object Store when running on Kubernetes, local files otherwise
+    #[arg(long, value_enum, default_value_t = SnapshotBackendArg::Auto)]
+    pub curation_snapshot_backend: SnapshotBackendArg,
+
+    /// NATS KV bucket name used to store shard snapshot manifests
+    #[arg(long, default_value = "arancini-snapshots")]
+    pub curation_snapshot_nats_kv_bucket: String,
+
+    /// NATS Object Store bucket name used to store shard snapshot payload blobs
+    #[arg(long, default_value = "arancini-snapshot-blobs")]
+    pub curation_snapshot_nats_object_store_bucket: String,
+
+    /// Snapshot sidecar command queue capacity for Arancini workers
+    #[arg(long, default_value_t = 1024)]
+    pub curation_snapshot_sidecar_buffer_size: usize,
+
     /// Set the verbosity level
     #[command(flatten)]
     pub verbose: Verbosity<InfoLevel>,
@@ -281,6 +315,22 @@ fn set_metrics(metrics_address: SocketAddr) {
         "risotto_arancini_bridge_queue_fill_ratio",
         "Current fill ratio of the Arancini monoio->tokio bridge queue"
     );
+    metrics::describe_gauge!(
+        "risotto_arancini_snapshot_queue_fill_ratio",
+        "Current fill ratio of the Arancini snapshot command queue"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_snapshot_persist_total",
+        "Total number of shard snapshots persisted by snapshot backend"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_snapshot_restore_total",
+        "Total number of shard snapshot restore requests served by snapshot backend"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_snapshot_errors_total",
+        "Total number of shard snapshot backend errors"
+    );
     metrics::describe_counter!(
         "risotto_arancini_nats_publish_enqueued_total",
         "Total number of updates enqueued for JetStream publish"
@@ -339,6 +389,18 @@ pub async fn configure() -> Result<AppConfig> {
         Vec::new()
     };
 
+    let snapshot_backend = match cli.curation_snapshot_backend {
+        SnapshotBackendArg::Auto => {
+            if std::env::var_os("KUBERNETES_SERVICE_HOST").is_some() {
+                SnapshotBackend::NatsKv
+            } else {
+                SnapshotBackend::Local
+            }
+        }
+        SnapshotBackendArg::Local => SnapshotBackend::Local,
+        SnapshotBackendArg::NatsKv => SnapshotBackend::NatsKv,
+    };
+
     // Set up metrics
     set_metrics(metrics_addr);
 
@@ -380,6 +442,10 @@ pub async fn configure() -> Result<AppConfig> {
             enabled: !cli.curation_disable,
             state_path: cli.curation_state_path,
             state_save_interval: cli.curation_state_interval,
+            snapshot_backend,
+            snapshot_nats_kv_bucket: cli.curation_snapshot_nats_kv_bucket,
+            snapshot_nats_object_store_bucket: cli.curation_snapshot_nats_object_store_bucket,
+            snapshot_sidecar_buffer_size: cli.curation_snapshot_sidecar_buffer_size,
         },
     })
 }

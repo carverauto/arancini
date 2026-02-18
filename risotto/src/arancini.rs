@@ -1,9 +1,15 @@
 use anyhow::Result;
+use async_nats::jetstream;
 use bgpkit_parser::bmp::messages::{PeerDownNotification, RouteMonitoring};
 use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
+use bytes::Bytes;
 use bytes::BytesMut;
+use crossfire::mpsc;
+use crossfire::{AsyncRxTrait, AsyncTxTrait};
 use metrics::counter;
 use metrics::gauge;
+use metrics::histogram;
+use monoio::fs::File;
 use monoio::io::AsyncReadRent;
 use monoio::net::{ListenerOpts, TcpListener, TcpStream};
 use monoio::time::sleep;
@@ -20,13 +26,118 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use std::time::Instant;
+use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
+use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::config::{AppConfig, BMPConfig};
+use crate::config::{AppConfig, BMPConfig, CurationConfig, NatsConfig, SnapshotBackend};
 
 const BMP_COMMON_HEADER_LEN: usize = 6;
 const BMP_MAX_MESSAGE_TYPE: u8 = 6;
 type WorkerShardState = Arc<Mutex<State<MemoryStore>>>;
+type SnapshotFlavor = mpsc::Array<SnapshotCommand>;
+type SnapshotTx = crossfire::MAsyncTx<SnapshotFlavor>;
+type SnapshotRx = crossfire::AsyncRx<SnapshotFlavor>;
+
+#[derive(Debug)]
+enum SnapshotCommand {
+    Persist {
+        worker_id: usize,
+        payload: Vec<u8>,
+    },
+    Restore {
+        worker_id: usize,
+        reply: oneshot::Sender<std::result::Result<Option<Vec<u8>>, String>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct SnapshotBridge {
+    tx: SnapshotTx,
+}
+
+impl SnapshotBridge {
+    fn bounded(size: usize) -> (Self, SnapshotRx) {
+        let (tx, rx) = mpsc::bounded_async(size);
+        (Self { tx }, rx)
+    }
+
+    async fn enqueue_persist(&self, worker_id: usize, payload: Vec<u8>) -> Result<()> {
+        self.tx
+            .send(SnapshotCommand::Persist { worker_id, payload })
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to enqueue shard snapshot persist: {}", err))?;
+        if let Some(capacity) = self.tx.capacity() {
+            gauge!("risotto_arancini_snapshot_queue_fill_ratio")
+                .set(self.tx.len() as f64 / capacity as f64);
+        }
+        Ok(())
+    }
+
+    async fn restore(&self, worker_id: usize) -> Result<Option<Vec<u8>>> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(SnapshotCommand::Restore {
+                worker_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to enqueue shard snapshot restore: {}", err))?;
+        if let Some(capacity) = self.tx.capacity() {
+            gauge!("risotto_arancini_snapshot_queue_fill_ratio")
+                .set(self.tx.len() as f64 / capacity as f64);
+        }
+        match reply_rx.await {
+            Ok(Ok(payload)) => Ok(payload),
+            Ok(Err(err)) => Err(anyhow::anyhow!("{}", err)),
+            Err(err) => Err(anyhow::anyhow!(
+                "failed waiting for snapshot restore response: {}",
+                err
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct SnapshotManifest {
+    object_name: String,
+    updated_unix_ms: i64,
+    payload_size_bytes: usize,
+    format_version: u8,
+}
+
+struct BytesAsyncReader {
+    data: Bytes,
+    pos: usize,
+}
+
+impl BytesAsyncReader {
+    fn new(data: Bytes) -> Self {
+        Self { data, pos: 0 }
+    }
+}
+
+impl AsyncRead for BytesAsyncReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if self.pos >= self.data.len() {
+            return std::task::Poll::Ready(Ok(()));
+        }
+        let remaining = &self.data[self.pos..];
+        let to_copy = remaining.len().min(buf.remaining());
+        if to_copy == 0 {
+            return std::task::Poll::Ready(Ok(()));
+        }
+
+        buf.put_slice(&remaining[..to_copy]);
+        self.pos += to_copy;
+        std::task::Poll::Ready(Ok(()))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct SessionOwnerEntry {
@@ -298,8 +409,18 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
         anyhow::bail!("arancini runtime requires at least one worker thread");
     }
     let bmp_config = cfg.bmp.clone();
-    let curation_enabled = cfg.curation.enabled;
+    let curation_cfg = cfg.curation.clone();
+    let nats_cfg = cfg.nats.clone();
     let ownership = SessionOwnerRegistry::default();
+    let snapshot_bridge =
+        if curation_cfg.enabled && curation_cfg.snapshot_backend == SnapshotBackend::NatsKv {
+            let (bridge, snapshot_rx) =
+                SnapshotBridge::bounded(curation_cfg.snapshot_sidecar_buffer_size);
+            spawn_snapshot_sidecar_thread(snapshot_rx, curation_cfg.clone(), nats_cfg)?;
+            Some(bridge)
+        } else {
+            None
+        };
 
     let core_ids = core_affinity::get_core_ids();
     info!(
@@ -310,7 +431,9 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
     for worker_id in 0..workers {
         let tx = tx.clone();
         let bmp_config = bmp_config.clone();
+        let curation_cfg = curation_cfg.clone();
         let ownership = ownership.clone();
+        let snapshot_bridge = snapshot_bridge.clone();
         let pinned_core = core_ids
             .as_ref()
             .and_then(|ids| ids.get(worker_id % ids.len()).cloned());
@@ -331,8 +454,15 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
                 };
 
                 runtime.block_on(async move {
-                    if let Err(err) =
-                        worker_loop(worker_id, bmp_config, tx, ownership, curation_enabled).await
+                    if let Err(err) = worker_loop(
+                        worker_id,
+                        bmp_config,
+                        tx,
+                        ownership,
+                        curation_cfg,
+                        snapshot_bridge,
+                    )
+                    .await
                     {
                         error!("arancini worker {} failed: {}", worker_id, err);
                     }
@@ -348,7 +478,8 @@ async fn worker_loop<S: UpdateSender>(
     cfg: BMPConfig,
     tx: S,
     ownership: SessionOwnerRegistry,
-    curation_enabled: bool,
+    curation_cfg: CurationConfig,
+    snapshot_bridge: Option<SnapshotBridge>,
 ) -> Result<()> {
     // SO_REUSEPORT is enabled to let the kernel spread accepted sessions across workers.
     let mut opts = ListenerOpts::new()
@@ -360,12 +491,59 @@ async fn worker_loop<S: UpdateSender>(
     }
     let listener = TcpListener::bind_with_config(cfg.host, &opts)?;
     info!("arancini worker {} listening on {}", worker_id, cfg.host);
+    let curation_enabled = curation_cfg.enabled;
     let shard = if curation_enabled {
         Some(Arc::new(Mutex::new(State::new(MemoryStore::new()))))
     } else {
         None
     };
     if curation_enabled {
+        if let Some(shard_ref) = &shard {
+            match curation_cfg.snapshot_backend {
+                SnapshotBackend::Local => {
+                    load_worker_shard_snapshot_local(shard_ref, worker_id, &curation_cfg).await;
+                }
+                SnapshotBackend::NatsKv => {
+                    if let Some(bridge) = &snapshot_bridge {
+                        load_worker_shard_snapshot_nats(shard_ref, worker_id, bridge).await;
+                    } else {
+                        error!(
+                            "arancini worker {} missing snapshot bridge for NATS restore backend",
+                            worker_id
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(snapshot_shard) = shard.clone() {
+            let snapshot_cfg = curation_cfg.clone();
+            let snapshot_bridge = snapshot_bridge.clone();
+            monoio::spawn(async move {
+                match snapshot_cfg.snapshot_backend {
+                    SnapshotBackend::Local => {
+                        worker_snapshot_loop_local(worker_id, snapshot_shard, snapshot_cfg).await
+                    }
+                    SnapshotBackend::NatsKv => {
+                        if let Some(bridge) = snapshot_bridge {
+                            worker_snapshot_loop_nats(
+                                worker_id,
+                                snapshot_shard,
+                                snapshot_cfg,
+                                bridge,
+                            )
+                            .await
+                        } else {
+                            error!(
+                                "arancini worker {} missing snapshot bridge for NATS persistence backend",
+                                worker_id
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
         debug!(
             "arancini worker {} enabled local shard curation state",
             worker_id
@@ -498,6 +676,491 @@ async fn handle_connection<S: UpdateSender>(
         "{}: arancini session ownership released for worker {}",
         socket, worker_id
     );
+
+    Ok(())
+}
+
+fn worker_snapshot_path(base_path: &str, worker_id: usize) -> String {
+    format!("{}.worker-{}.bin", base_path, worker_id)
+}
+
+fn worker_snapshot_manifest_key(worker_id: usize) -> String {
+    format!("worker-{}", worker_id)
+}
+
+fn worker_snapshot_object_name(worker_id: usize) -> String {
+    format!("worker-{}-latest", worker_id)
+}
+
+fn install_restored_store(
+    shard: &WorkerShardState,
+    worker_id: usize,
+    source: &str,
+    store: MemoryStore,
+) -> Result<()> {
+    let peers = store.get_peers();
+    for (router_addr, peer_addr) in &peers {
+        let updates = store.get_updates_by_peer(router_addr, peer_addr);
+        gauge!(
+            "risotto_state_updates",
+            "router" => router_addr.to_string(),
+            "peer" => peer_addr.to_string()
+        )
+        .set(updates.len() as f64);
+    }
+
+    let mut state = lock_worker_shard(shard)?;
+    state.store = store;
+    info!(
+        "arancini worker {} restored shard snapshot from {} ({} peers)",
+        worker_id,
+        source,
+        peers.len()
+    );
+    Ok(())
+}
+
+async fn load_worker_shard_snapshot_local(
+    shard: &WorkerShardState,
+    worker_id: usize,
+    cfg: &CurationConfig,
+) {
+    let state_path = worker_snapshot_path(&cfg.state_path, worker_id);
+    match monoio::fs::read(&state_path).await {
+        Ok(encoded) => match postcard::from_bytes::<MemoryStore>(&encoded) {
+            Ok(store) => {
+                if let Err(err) = install_restored_store(shard, worker_id, &state_path, store) {
+                    error!(
+                        "arancini worker {} failed to apply local snapshot {}: {}",
+                        worker_id, state_path, err
+                    );
+                }
+            }
+            Err(err) => {
+                error!(
+                    "arancini worker {} failed to deserialize snapshot {}: {}",
+                    worker_id, state_path, err
+                );
+                let backup_path = format!(
+                    "{}.corrupted-{}",
+                    state_path,
+                    chrono::Utc::now().timestamp()
+                );
+                warn!(
+                    "arancini worker {} renaming corrupted snapshot to {}",
+                    worker_id, backup_path
+                );
+                if let Err(rename_err) = std::fs::rename(&state_path, backup_path) {
+                    warn!(
+                        "arancini worker {} failed to rename corrupted snapshot {}: {}",
+                        worker_id, state_path, rename_err
+                    );
+                }
+            }
+        },
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                info!(
+                    "arancini worker {} snapshot {} not found; starting empty",
+                    worker_id, state_path
+                );
+            } else {
+                warn!(
+                    "arancini worker {} failed to read snapshot {}: {}",
+                    worker_id, state_path, err
+                );
+            }
+        }
+    }
+}
+
+async fn load_worker_shard_snapshot_nats(
+    shard: &WorkerShardState,
+    worker_id: usize,
+    bridge: &SnapshotBridge,
+) {
+    match bridge.restore(worker_id).await {
+        Ok(Some(encoded)) => match postcard::from_bytes::<MemoryStore>(&encoded) {
+            Ok(store) => {
+                let source = format!(
+                    "nats:{}:{}",
+                    "manifest",
+                    worker_snapshot_manifest_key(worker_id)
+                );
+                if let Err(err) = install_restored_store(shard, worker_id, &source, store) {
+                    error!(
+                        "arancini worker {} failed to apply NATS snapshot: {}",
+                        worker_id, err
+                    );
+                }
+            }
+            Err(err) => {
+                error!(
+                    "arancini worker {} failed to deserialize NATS snapshot payload: {}",
+                    worker_id, err
+                );
+            }
+        },
+        Ok(None) => {
+            info!(
+                "arancini worker {} has no NATS snapshot manifest; starting empty",
+                worker_id
+            );
+        }
+        Err(err) => {
+            warn!(
+                "arancini worker {} failed to restore from NATS snapshot backend: {}",
+                worker_id, err
+            );
+        }
+    }
+}
+
+async fn dump_worker_shard_snapshot_local(
+    shard: &WorkerShardState,
+    worker_id: usize,
+    cfg: &CurationConfig,
+) -> Result<()> {
+    let state_path = worker_snapshot_path(&cfg.state_path, worker_id);
+    let temp_path = format!("{}.tmp", state_path);
+    let parent_dir = std::path::Path::new(&state_path).parent();
+    if let Some(parent_dir) = parent_dir {
+        if !parent_dir.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent_dir).map_err(|err| {
+                anyhow::anyhow!(
+                    "arancini worker {} failed to create snapshot dir {}: {}",
+                    worker_id,
+                    parent_dir.display(),
+                    err
+                )
+            })?;
+        }
+    }
+
+    let snapshot_store = {
+        let state = lock_worker_shard(shard)?;
+        state.store.clone()
+    };
+    let encoded = postcard::to_allocvec(&snapshot_store).map_err(|err| {
+        anyhow::anyhow!(
+            "arancini worker {} failed to serialize shard snapshot {}: {}",
+            worker_id,
+            state_path,
+            err
+        )
+    })?;
+
+    let file = File::create(&temp_path).await.map_err(|err| {
+        anyhow::anyhow!(
+            "arancini worker {} failed to create snapshot temp file {}: {}",
+            worker_id,
+            temp_path,
+            err
+        )
+    })?;
+    let (write_res, _) = file.write_all_at(encoded, 0).await;
+    if let Err(err) = write_res {
+        let _ = std::fs::remove_file(&temp_path);
+        anyhow::bail!(
+            "arancini worker {} failed to write snapshot {}: {}",
+            worker_id,
+            temp_path,
+            err
+        );
+    }
+    if let Err(err) = file.sync_all().await {
+        let _ = std::fs::remove_file(&temp_path);
+        anyhow::bail!(
+            "arancini worker {} failed to sync snapshot {}: {}",
+            worker_id,
+            temp_path,
+            err
+        );
+    }
+
+    std::fs::rename(&temp_path, &state_path).map_err(|err| {
+        let _ = std::fs::remove_file(&temp_path);
+        anyhow::anyhow!(
+            "arancini worker {} failed to rename snapshot {} to {}: {}",
+            worker_id,
+            temp_path,
+            state_path,
+            err
+        )
+    })?;
+
+    Ok(())
+}
+
+async fn dump_worker_shard_snapshot_nats(
+    shard: &WorkerShardState,
+    worker_id: usize,
+    bridge: &SnapshotBridge,
+) -> Result<()> {
+    let snapshot_store = {
+        let state = lock_worker_shard(shard)?;
+        state.store.clone()
+    };
+    let encoded = postcard::to_allocvec(&snapshot_store).map_err(|err| {
+        anyhow::anyhow!(
+            "arancini worker {} failed to serialize shard snapshot for NATS backend: {}",
+            worker_id,
+            err
+        )
+    })?;
+    bridge.enqueue_persist(worker_id, encoded).await?;
+    Ok(())
+}
+
+async fn worker_snapshot_loop_local(
+    worker_id: usize,
+    shard: WorkerShardState,
+    cfg: CurationConfig,
+) {
+    let interval_secs = cfg.state_save_interval.max(1);
+    loop {
+        sleep(Duration::from_secs(interval_secs)).await;
+        let start = Instant::now();
+        match dump_worker_shard_snapshot_local(&shard, worker_id, &cfg).await {
+            Ok(()) => {
+                counter!("risotto_state_dump_total").increment(1);
+                histogram!("risotto_state_dump_duration_seconds")
+                    .record(start.elapsed().as_secs_f64());
+                trace!(
+                    "arancini worker {} persisted shard snapshot to {}",
+                    worker_id,
+                    worker_snapshot_path(&cfg.state_path, worker_id)
+                );
+            }
+            Err(err) => {
+                error!(
+                    "arancini worker {} failed to persist shard snapshot: {}",
+                    worker_id, err
+                );
+            }
+        }
+    }
+}
+
+async fn worker_snapshot_loop_nats(
+    worker_id: usize,
+    shard: WorkerShardState,
+    cfg: CurationConfig,
+    bridge: SnapshotBridge,
+) {
+    let interval_secs = cfg.state_save_interval.max(1);
+    loop {
+        sleep(Duration::from_secs(interval_secs)).await;
+        let start = Instant::now();
+        match dump_worker_shard_snapshot_nats(&shard, worker_id, &bridge).await {
+            Ok(()) => {
+                counter!("risotto_state_dump_total").increment(1);
+                histogram!("risotto_state_dump_duration_seconds")
+                    .record(start.elapsed().as_secs_f64());
+                trace!(
+                    "arancini worker {} enqueued shard snapshot to NATS backend",
+                    worker_id
+                );
+            }
+            Err(err) => {
+                error!(
+                    "arancini worker {} failed to enqueue NATS shard snapshot: {}",
+                    worker_id, err
+                );
+            }
+        }
+    }
+}
+
+fn spawn_snapshot_sidecar_thread(
+    rx: SnapshotRx,
+    curation_cfg: CurationConfig,
+    nats_cfg: NatsConfig,
+) -> Result<()> {
+    std::thread::Builder::new()
+        .name("arancini-snapshot-sidecar".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    error!("failed to build arancini snapshot sidecar runtime: {}", err);
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                if let Err(err) = snapshot_sidecar_loop(rx, curation_cfg, nats_cfg).await {
+                    error!("arancini snapshot sidecar failed: {}", err);
+                }
+            });
+        })
+        .map(|_| ())
+        .map_err(|err| anyhow::anyhow!("failed to spawn snapshot sidecar thread: {}", err))
+}
+
+async fn get_or_create_kv_store(
+    js: &jetstream::Context,
+    bucket: &str,
+) -> Result<jetstream::kv::Store> {
+    match js.get_key_value(bucket).await {
+        Ok(kv) => Ok(kv),
+        Err(_) => {
+            js.create_key_value(jetstream::kv::Config {
+                bucket: bucket.to_string(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to create key-value bucket {}: {}", bucket, err))
+        }
+    }
+}
+
+async fn get_or_create_object_store(
+    js: &jetstream::Context,
+    bucket: &str,
+) -> Result<jetstream::object_store::ObjectStore> {
+    match js.get_object_store(bucket).await {
+        Ok(store) => Ok(store),
+        Err(_) => js
+            .create_object_store(jetstream::object_store::Config {
+                bucket: bucket.to_string(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!("failed to create object store bucket {}: {}", bucket, err)
+            }),
+    }
+}
+
+async fn snapshot_sidecar_loop(
+    rx: SnapshotRx,
+    curation_cfg: CurationConfig,
+    nats_cfg: NatsConfig,
+) -> Result<()> {
+    let client = async_nats::connect(nats_cfg.server.clone())
+        .await
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "failed to connect snapshot sidecar to NATS {}: {}",
+                nats_cfg.server,
+                err
+            )
+        })?;
+    let js = jetstream::new(client);
+    let kv = get_or_create_kv_store(&js, &curation_cfg.snapshot_nats_kv_bucket).await?;
+    let object_store =
+        get_or_create_object_store(&js, &curation_cfg.snapshot_nats_object_store_bucket).await?;
+
+    info!(
+        "arancini snapshot sidecar connected to {} (kv={}, object_store={})",
+        nats_cfg.server,
+        curation_cfg.snapshot_nats_kv_bucket,
+        curation_cfg.snapshot_nats_object_store_bucket
+    );
+
+    loop {
+        let command = match rx.recv().await {
+            Ok(command) => command,
+            Err(_) => break,
+        };
+        if let Some(capacity) = rx.capacity() {
+            gauge!("risotto_arancini_snapshot_queue_fill_ratio")
+                .set(rx.len() as f64 / capacity as f64);
+        }
+
+        match command {
+            SnapshotCommand::Persist { worker_id, payload } => {
+                let object_name = worker_snapshot_object_name(worker_id);
+                let payload_size_bytes = payload.len();
+                let mut reader = BytesAsyncReader::new(Bytes::from(payload));
+                if let Err(err) = object_store.put(object_name.as_str(), &mut reader).await {
+                    counter!("risotto_arancini_snapshot_errors_total").increment(1);
+                    error!(
+                        "snapshot sidecar failed object-store put for {}: {}",
+                        object_name, err
+                    );
+                    continue;
+                }
+
+                let manifest = SnapshotManifest {
+                    object_name,
+                    updated_unix_ms: chrono::Utc::now().timestamp_millis(),
+                    payload_size_bytes,
+                    format_version: 1,
+                };
+                let manifest_key = worker_snapshot_manifest_key(worker_id);
+                let manifest_payload = match serde_json::to_vec(&manifest) {
+                    Ok(payload) => payload,
+                    Err(err) => {
+                        counter!("risotto_arancini_snapshot_errors_total").increment(1);
+                        error!(
+                            "snapshot sidecar failed to encode snapshot manifest: {}",
+                            err
+                        );
+                        continue;
+                    }
+                };
+                if let Err(err) = kv.put(manifest_key.clone(), manifest_payload.into()).await {
+                    counter!("risotto_arancini_snapshot_errors_total").increment(1);
+                    error!(
+                        "snapshot sidecar failed kv put for {}: {}",
+                        manifest_key, err
+                    );
+                    continue;
+                }
+                counter!("risotto_arancini_snapshot_persist_total").increment(1);
+            }
+            SnapshotCommand::Restore { worker_id, reply } => {
+                let response = async {
+                    let manifest_key = worker_snapshot_manifest_key(worker_id);
+                    let manifest_bytes = match kv.get(manifest_key.clone()).await {
+                        Ok(Some(bytes)) => bytes,
+                        Ok(None) => return Ok(None),
+                        Err(err) => {
+                            return Err(anyhow::anyhow!(
+                                "failed kv get for {}: {}",
+                                manifest_key,
+                                err
+                            ))
+                        }
+                    };
+                    let manifest: SnapshotManifest = serde_json::from_slice(&manifest_bytes)
+                        .map_err(|err| {
+                            anyhow::anyhow!("failed to decode manifest json: {}", err)
+                        })?;
+
+                    let mut object = object_store
+                        .get(manifest.object_name.clone())
+                        .await
+                        .map_err(|err| {
+                            anyhow::anyhow!(
+                                "failed object-store get for {}: {}",
+                                manifest.object_name,
+                                err
+                            )
+                        })?;
+                    let mut payload = Vec::with_capacity(manifest.payload_size_bytes);
+                    object
+                        .read_to_end(&mut payload)
+                        .await
+                        .map_err(|err| anyhow::anyhow!("failed reading object payload: {}", err))?;
+                    Ok(Some(payload))
+                }
+                .await
+                .map_err(|err| err.to_string());
+                if response.is_err() {
+                    counter!("risotto_arancini_snapshot_errors_total").increment(1);
+                } else {
+                    counter!("risotto_arancini_snapshot_restore_total").increment(1);
+                }
+                let _ = reply.send(response);
+            }
+        }
+    }
 
     Ok(())
 }

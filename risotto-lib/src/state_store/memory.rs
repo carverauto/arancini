@@ -7,7 +7,7 @@ use crate::state::TimedPrefix;
 use crate::state_store::store::StateStore;
 use crate::update::Update;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MemoryStore {
     routers: HashMap<IpAddr, Router, RandomState>,
 }
@@ -69,7 +69,7 @@ pub struct Peer {
     pub updates: HashSet<TimedPrefix, RandomState>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Router {
     peers: HashMap<IpAddr, Peer, RandomState>,
 }

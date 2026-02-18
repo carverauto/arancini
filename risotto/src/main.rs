@@ -147,7 +147,11 @@ async fn main() -> Result<()> {
         shutdown.spawn_task(curation_state_handler(state.clone(), cfg.clone()));
         Some(state)
     } else {
-        debug!("curation is disabled - forwarding all updates as-is");
+        if cfg.runtime.mode == RuntimeMode::Arancini && curation_config.enabled {
+            debug!("using Arancini per-worker shard curation (no legacy global state)");
+        } else {
+            debug!("curation is disabled - forwarding all updates as-is");
+        }
         None
     };
 

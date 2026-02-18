@@ -1,23 +1,27 @@
-<p align="center">
-  <img src="https://nxthdr.dev/risotto/logo.png" height="256" width="256" alt="Project Logo" />
-</p>
+# Arancini 😋
 
-# Risotto
+**Arancini** is a carrier-grade BGP Monitoring Protocol (BMP) collector designed for ultra-high throughput and sub-millisecond telemetry pipelines. Built on a shared-nothing, thread-per-core architecture, it ingests BMP feeds from routers and streams curated BGP updates to **NATS JetStream**.
 
-Risotto 😋 is a high-performance collector that processes BMP messages from routers with the Arancini shared-nothing runtime. This repository includes both the Risotto collector application and the Risotto library.
+Arancini is a high-performance fork of [Risotto](https://github.com/nxthdr/risotto), re-engineered for linear scalability and zero-copy data paths.
 
-The collector can forward updates to Kafka/Redpanda or NATS JetStream, while the library provides core BMP decoding and BGP update processing primitives.
+## Key Features
+
+- **Thread-per-Core Architecture:** Powered by `monoio` and `io_uring`, Arancini pins worker threads to physical CPU cores, eliminating context switching and lock contention.
+- **Zero-Copy Ingest:** Utilizes registered buffer rings to DMA packets directly from the kernel to userspace.
+- **Shared-Nothing State:** Curation state is sharded across workers. Each core manages its own RIB, enabling lock-free deduplication and synthetic withdraw generation.
+- **NATS JetStream Native:** Replaces Kafka with high-performance async publishing to NATS, supporting fine-grained subject schemas (e.g., `arancini.updates.v4_192_0_2_1.64512.1_1`).
+- **Cloud-Native Persistence:** Supports state snapshots to local storage or NATS Object Store for seamless recovery in Kubernetes environments.
+
+---
 
 ## Quick Start
 
-The easiest way to use Risotto with Docker. This command will output the help message and exit:
-
+The fastest way to deploy Arancini is via Docker. The following command displays the help menu:
 ```bash
 docker run ghcr.io/carverauto/arancini:v0.7.0 --help
 ```
 
-To run Risotto with Docker with the default parameters, you can use the following command:
-
+To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
 ```bash
 docker run \
   -p 4000:4000 \
@@ -25,31 +29,56 @@ docker run \
   ghcr.io/carverauto/arancini:v0.7.0
 ```
 
-By default, Risotto listens on port `4000` for BMP messages.
-Additionally, a Prometheus HTTP endpoint is available at `http://localhost:8080/metrics` to monitor the collector's performance and statistics.
+Monitoring is available via the Prometheus endpoint at `http://localhost:8080/metrics`.
 
-## Data Curation
+## Data Curation & Reliability
 
-Risotto maintains a state representing connected routers and their associated BGP peers and announced prefixes. This state is dumped to a file at specified intervals.
-This state addresses two challenges when handling BMP data:
-- **Duplicate announcements** from BMP session resets, where the router resends all active prefixes to the collector after a restart or connectivity issue.
-- **Missing withdraws** that occur when a BGP session goes down and the router is implemented not to send the withdraws messages, or when the collector experiences downtime. These scenarios can result in stale or inaccurate BGP state in downstream systems.
+Arancini maintains a high-fidelity representation of connected routers and their peers to solve common BMP data integrity issues:
 
-Risotto checks each incoming update against its state. If the prefix is already present, the update is not sent downstream. Missing withdraws are generated synthetically when receiving Peer Down notifications, if the withdraws have not been sent by the router, by using the prefixes stored in the state for this router and downed peer.
+- **Duplicate Suppression:** Suppresses redundant prefix announcements caused by BMP session resets or router restarts.
+- **Synthetic Withdraws:** Automatically generates withdraw messages when a Peer Down notification is received, even if the router fails to send them.
+- **Stateless Mode:** For pure telemetry ingestion without curation, Arancini can be configured to forward all updates as-is, bypassing the state store.
 
-When the collector restarts, Risotto infers any missing withdraws from the initial Peer Up sequence, ensuring the database remains accurate despite downtime. However, any announcements received after the last saved state may be replayed. In short, Risotto guarantees a consistent database state, though it may contain some duplicate announcements following a restart.
+## Architecture: Arancini vs. Risotto
 
-Conversely, Risotto can be configured to stream updates to the event pipeline as is by disabling the state usage.
+While Risotto provides a robust standard async implementation, Arancini is built for massive scale:
 
-## Decoupling Collection from Curation
+| Feature | Risotto (Legacy) | Arancini |
+|---|---|---|
+| Async Runtime | Tokio (Work-Stealing) | Monoio (Thread-per-Core) |
+| I/O Driver | Epoll / Kqueue | Linux `io_uring` |
+| State Locking | Global `Arc<Mutex>` | Lock-Free Shards |
+| Messaging | Kafka / Redpanda | NATS JetStream |
+| Memory Path | Heap-allocated `Vec` | Registered `BufRing` |
 
-The Risotto application couples collection (parsing BMP messages) and curation (deduplication, synthetic withdraws) together for simplicity. Of course, you can disable curation to use the app as a stateless collector.
+## Kernel Tuning for High Load
 
-Moreover, the library is designed to facilitate decoupling these two concerns, allowing you to design your data processing pipeline as needed. This enables you to build separate applications, a collector and a curator, using your own serialization format, state store implementation, and streaming platform.
+To achieve maximum throughput (>500k updates/sec), ensure your Linux host is tuned for high-concurrency I/O:
+```bash
+# Increase file descriptor limits
+ulimit -n 1048576
 
-## Contributing
+# Tune TCP receive buffers for large bursts
+sysctl -w net.core.rmem_max=33554432
+sysctl -w net.ipv4.tcp_rmem="4096 87380 33554432"
+```
 
-Refer to the Docker Compose [integration](./integration/) tests to try Risotto locally. The setup includes BIRD and GoBGP routers announcing BGP updates between them, and transmitting BMP messages to Risotto.
+## Contributing & Development
+
+To test the full pipeline locally, refer to the Integration Tests. The setup uses Docker Compose to spin up:
+
+1. **Routers:** BIRD and GoBGP instances.
+2. **Infrastructure:** NATS JetStream and ClickHouse.
+3. **Collector:** Arancini running in worker mode.
+
+## Running Tests
+```bash
+docker compose -f integration/compose.yml up -d --build
+```
+
+---
+
+Refer to the Docker Compose [integration](./integration/) tests to try Arancini locally. The setup includes BIRD and GoBGP routers announcing BGP updates between them, and transmitting BMP messages to Risotto.
 
 ## Linux Performance Validation
 

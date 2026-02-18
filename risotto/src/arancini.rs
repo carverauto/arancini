@@ -447,7 +447,10 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
                     let _ = core_affinity::set_for_current(core_id);
                 }
 
-                let mut runtime = match RuntimeBuilder::<FusionDriver>::new().build() {
+                let mut runtime = match RuntimeBuilder::<FusionDriver>::new()
+                    .enable_timer()
+                    .build()
+                {
                     Ok(runtime) => runtime,
                     Err(err) => {
                         error!("failed to build arancini monoio runtime: {}", err);

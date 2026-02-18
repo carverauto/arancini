@@ -62,3 +62,31 @@ bash integration/bench/run_2_6_linux_tuning_validation.sh
 This validates:
 - Runtime socket option enforcement in code (`SO_REUSEPORT`, `TCP_NODELAY`, backlog and `SO_RCVBUF` wiring).
 - Linux host tuning guidance (`sysctl`, file descriptor limits, and RSS/IRQ readiness checks).
+
+## Old Kafka vs New NATS JetStream Benchmark
+
+Use this script to compare the old Kafka profile (`old-risotto/`) against the new Arancini + NATS JetStream profile:
+
+```bash
+ROUTE_COUNT=100 RECONNECT_CYCLES=2 BURST_ROUTES_PER_CYCLE=50 RECONNECT_SLEEP_SECONDS=2 POST_BURST_WAIT_SECONDS=5 \
+  integration/bench/run_old_kafka_vs_new_nats.sh
+```
+
+The script writes a full report to:
+
+```bash
+integration/bench/old-kafka-vs-new-nats-report.md
+```
+
+Latest run (`2026-02-18T20:56:30Z`) on `Linux 5.15.0-312.187.5.3.el9uek.x86_64`:
+
+| Profile | kafka_messages delta | nats_publish_enqueued delta | bmp_message rate (/s) | error count |
+|---|---:|---:|---:|---:|
+| old-kafka | 0 | 0 | 0.22 | 0 |
+| new-nats | 0 | 0 | 0.22 | 0 |
+
+Observed result for this reconnect-burst profile: `1.00x` (`bmp` shared-rate fallback, parity).
+
+Notes:
+- Transport-specific counters were `0` in this profile (`kafka_messages`, `nats_publish_enqueued`), so the effective comparator is shared BMP ingest rate.
+- This shows stability/parity for this workload; it does not yet prove publish-path throughput superiority of NATS over Kafka.

@@ -5,7 +5,7 @@ on: [ "push", "pull_request" ]
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: carverauto/arancini
+  IMAGE_NAME: ${{ github.repository }}
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
 

@@ -1,4 +1,5 @@
 pub mod processor;
+pub mod sender;
 pub mod state;
 pub mod state_store;
 pub mod update;
@@ -8,21 +9,21 @@ use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
 use bytes::Bytes;
 use metrics::counter;
 use std::net::SocketAddr;
-use tokio::sync::mpsc::Sender;
 use tracing::{debug, trace};
 
 use crate::processor::{
     decode_bmp_message, peer_down_notification, peer_up_notification, route_monitoring,
 };
+use crate::sender::UpdateSender;
 use crate::state::AsyncState;
 use crate::state_store::store::StateStore;
-use crate::update::{new_metadata, Update};
+use crate::update::new_metadata;
 
 /// Process a BMP message from raw bytes
 /// This is a convenience wrapper for BMP collectors
-pub async fn process_bmp_message<T: StateStore>(
+pub async fn process_bmp_message<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     socket: SocketAddr,
     bytes: &mut Bytes,
 ) -> Result<()> {
@@ -37,34 +38,34 @@ pub async fn process_bmp_message<T: StateStore>(
     trace!("{} - {:?}", socket, message);
 
     // Extract header and peer information
-    let metadata = new_metadata(socket.clone(), &message);
+    let metadata = new_metadata(socket, &message);
 
     let metric_name = "risotto_bmp_messages_total";
     match message.message_body {
         BmpMessageBody::InitiationMessage(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
+            trace!("{}: {:?}", socket, body);
             let tlvs_info = body
                 .tlvs
                 .iter()
                 .map(|tlv| tlv.info.clone())
                 .collect::<Vec<_>>();
-            debug!("{}: InitiationMessage: {:?}", socket.to_string(), tlvs_info);
+            debug!("{}: InitiationMessage: {:?}", socket, tlvs_info);
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "initiation")
                 .increment(1);
             // No-Op
         }
         BmpMessageBody::PeerUpNotification(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
+            trace!("{}: {:?}", socket, body);
             if metadata.is_none() {
                 anyhow::bail!(
                     "{}: PeerUpNotification: no per-peer header",
-                    socket.to_string()
+                    socket
                 );
             }
             let metadata = metadata.unwrap();
             debug!(
                 "{}: PeerUpNotification: {}",
-                socket.to_string(),
+                socket,
                 metadata.peer_addr
             );
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_up_notification")
@@ -72,11 +73,11 @@ pub async fn process_bmp_message<T: StateStore>(
             peer_up_notification(state, tx, metadata, body).await?;
         }
         BmpMessageBody::RouteMonitoring(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
+            trace!("{}: {:?}", socket, body);
             if metadata.is_none() {
                 anyhow::bail!(
                     "{}: RouteMonitoring - no per-peer header",
-                    socket.to_string()
+                    socket
                 );
             }
             let metadata = metadata.unwrap();
@@ -89,24 +90,24 @@ pub async fn process_bmp_message<T: StateStore>(
             }
         }
         BmpMessageBody::RouteMirroring(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
-            debug!("{}: RouteMirroring", socket.to_string());
+            trace!("{}: {:?}", socket, body);
+            debug!("{}: RouteMirroring", socket);
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "route_mirroring")
                 .increment(1);
             // No-Op
         }
         BmpMessageBody::PeerDownNotification(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
+            trace!("{}: {:?}", socket, body);
             if metadata.is_none() {
                 anyhow::bail!(
                     "{}: PeerDownNotification: no per-peer header",
-                    socket.to_string()
+                    socket
                 );
             }
             let metadata = metadata.unwrap();
             debug!(
                 "{}: PeerDownNotification: {}. Reason: {:?}",
-                socket.to_string(),
+                socket,
                 metadata.peer_addr,
                 body.reason
             );
@@ -116,15 +117,15 @@ pub async fn process_bmp_message<T: StateStore>(
         }
 
         BmpMessageBody::TerminationMessage(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
-            debug!("{}: TerminationMessage", socket.to_string());
+            trace!("{}: {:?}", socket, body);
+            debug!("{}: TerminationMessage", socket);
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "termination")
                 .increment(1);
             // No-Op
         }
         BmpMessageBody::StatsReport(body) => {
-            trace!("{}: {:?}", socket.to_string(), body);
-            debug!("{}: StatsReport", socket.to_string());
+            trace!("{}: {:?}", socket, body);
+            debug!("{}: StatsReport", socket);
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "stats_report")
                 .increment(1);
             // No-Op

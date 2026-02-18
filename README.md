@@ -18,7 +18,7 @@ Arancini is a high-performance fork of [Risotto](https://github.com/nxthdr/risot
 
 The fastest way to deploy Arancini is via Docker. The following command displays the help menu:
 ```bash
-docker run ghcr.io/carverauto/arancini:main --help
+docker run ghcr.io/carverauto/arancini:v0.7.0 --help
 ```
 
 To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
@@ -26,7 +26,7 @@ To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
 docker run \
   -p 4000:4000 \
   -p 8080:8080 \
-  ghcr.io/carverauto/arancini:main
+  ghcr.io/carverauto/arancini:v0.7.0
 ```
 
 Monitoring is available via the Prometheus endpoint at `http://localhost:8080/metrics`.
@@ -78,4 +78,52 @@ docker compose -f integration/compose.yml up -d --build
 
 ---
 
-Built with 🦀 by the Arancini contributors.
+Refer to the Docker Compose [integration](./integration/) tests to try Arancini locally. The setup includes BIRD and GoBGP routers announcing BGP updates between them, and transmitting BMP messages to Risotto.
+
+## Linux Performance Validation
+
+For Arancini deployments, run the tuning/socket validation checks:
+
+```bash
+bash integration/bench/run_2_6_linux_tuning_validation.sh
+```
+
+This validates:
+- Runtime socket option enforcement in code (`SO_REUSEPORT`, `TCP_NODELAY`, backlog and `SO_RCVBUF` wiring).
+- Linux host tuning guidance (`sysctl`, file descriptor limits, and RSS/IRQ readiness checks).
+
+## Runtime Benchmark (Arancini)
+
+Use this script to benchmark Arancini runtime throughput with producer paths disabled:
+
+```bash
+ROUTE_COUNT_PER_BIRD=2000 TARGET_RX_DELTA=2000 TIMEOUT_SECONDS=180 ARANCINI_WORKERS=4 \
+  integration/bench/run_bird_saturating_runtime_benchmark.sh
+```
+
+The script writes the report to:
+
+```bash
+integration/bench/risotto-vs-arancini-bird-saturating-report.md
+```
+
+Use the report to capture current throughput and latency numbers for your target profile and host.
+
+## NATS JetStream mTLS
+
+Arancini supports TLS and mutual TLS for the NATS JetStream sidecar path.
+
+Example:
+
+```bash
+./target/release/risotto \
+  --nats-enable \
+  --nats-server nats://nats.example.net:4222 \
+  --nats-tls-required \
+  --nats-tls-ca-cert-path /etc/risotto/nats/ca.pem \
+  --nats-tls-client-cert-path /etc/risotto/nats/client.pem \
+  --nats-tls-client-key-path /etc/risotto/nats/client-key.pem
+```
+
+Optional:
+- `--nats-tls-first` enables handshake-first mode when the NATS server is configured for it.

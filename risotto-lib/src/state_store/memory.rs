@@ -1,3 +1,4 @@
+use ahash::RandomState;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
@@ -6,21 +7,27 @@ use crate::state::TimedPrefix;
 use crate::state_store::store::StateStore;
 use crate::update::Update;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MemoryStore {
-    routers: HashMap<IpAddr, Router>,
+    routers: HashMap<IpAddr, Router, RandomState>,
 }
 
 impl MemoryStore {
     pub fn new() -> MemoryStore {
         MemoryStore {
-            routers: HashMap::new(),
+            routers: HashMap::with_hasher(RandomState::default()),
         }
     }
 
     fn _get_router(&mut self, router_addr: &IpAddr) -> &mut Router {
         let router = self.routers.entry(*router_addr).or_insert(Router::new());
         router
+    }
+}
+
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -48,7 +55,7 @@ impl StateStore for MemoryStore {
     fn get_updates_by_peer(&self, router_addr: &IpAddr, peer_addr: &IpAddr) -> Vec<TimedPrefix> {
         let router_binding = Router::new();
         let router = self.routers.get(router_addr).unwrap_or(&router_binding);
-        let peer = match router.peers.get(&*peer_addr) {
+        let peer = match router.peers.get(peer_addr) {
             Some(peer) => peer,
             None => return Vec::new(),
         };
@@ -65,35 +72,35 @@ impl StateStore for MemoryStore {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Peer {
     pub peer_addr: IpAddr,
-    pub updates: HashSet<TimedPrefix>,
+    pub updates: HashSet<TimedPrefix, RandomState>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Router {
-    peers: HashMap<IpAddr, Peer>,
+    peers: HashMap<IpAddr, Peer, RandomState>,
 }
 
 impl Router {
     fn new() -> Router {
         Router {
-            peers: HashMap::new(),
+            peers: HashMap::with_hasher(RandomState::default()),
         }
     }
 
     fn add_peer(&mut self, peer_addr: &IpAddr) {
         self.peers.entry(*peer_addr).or_insert_with(|| Peer {
-            peer_addr: peer_addr.clone(),
-            updates: HashSet::new(),
+            peer_addr: *peer_addr,
+            updates: HashSet::with_hasher(RandomState::default()),
         });
     }
 
     fn remove_peer(&mut self, peer_addr: &IpAddr) {
-        self.peers.remove(&peer_addr);
+        self.peers.remove(peer_addr);
     }
 
     fn update(&mut self, peer_addr: &IpAddr, update: &Update) -> bool {
         self.add_peer(peer_addr);
-        let peer = self.peers.get_mut(&peer_addr).unwrap();
+        let peer = self.peers.get_mut(peer_addr).unwrap();
 
         let now: i64 = chrono::Utc::now().timestamp_millis();
         let timed_prefix = TimedPrefix {

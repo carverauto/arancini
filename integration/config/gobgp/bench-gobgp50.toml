@@ -1,0 +1,21 @@
+[global.config]
+    as = 65050
+    router-id = "10.0.0.50"
+
+[[neighbors]]
+    [neighbors.config]
+        neighbor-address = "10.0.0.10"
+        peer-as = 65010
+
+    [[neighbors.afi-safis]]
+        [neighbors.afi-safis.config]
+        afi-safi-name = "ipv4-unicast"
+
+[[neighbors]]
+    [neighbors.config]
+        neighbor-address = "10.0.0.20"
+        peer-as = 65020
+
+    [[neighbors.afi-safis]]
+        [neighbors.afi-safis.config]
+        afi-safi-name = "ipv4-unicast"

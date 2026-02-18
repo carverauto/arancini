@@ -7,12 +7,13 @@ use bgpkit_parser::models::{
 use chrono::DateTime;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::sync::mpsc::channel;
 
 use risotto_lib::processor::{peer_down_notification, peer_up_notification, route_monitoring};
 use risotto_lib::state::new_state;
 use risotto_lib::state_store::memory::MemoryStore;
-use risotto_lib::update::{Update, UpdateMetadata};
+use risotto_lib::update::{Update, UpdateAttributes, UpdateMetadata};
 
 fn default_open_message() -> BgpOpenMessage {
     BgpOpenMessage {
@@ -96,26 +97,10 @@ async fn test_route_monitoring() {
             is_adj_rib_out: false,
             announced: true,
             synthetic: false,
-
-            // BGP Attributes - structured fields
-            origin: "INCOMPLETE".to_string(),
-            as_path: vec![],
-            next_hop: None,
-            multi_exit_discriminator: None,
-            local_preference: None,
-            only_to_customer: None,
-            atomic_aggregate: false,
-            aggregator_asn: None,
-            aggregator_bgp_id: None,
-            communities: vec![],
-            extended_communities: vec![],
-            large_communities: vec![],
-            originator_id: None,
-            cluster_list: vec![],
-            mp_reach_afi: None,
-            mp_reach_safi: None,
-            mp_unreach_afi: None,
-            mp_unreach_safi: None,
+            attrs: Arc::new(UpdateAttributes {
+                origin: "INCOMPLETE".to_string(),
+                ..Default::default()
+            }),
         }],
     ));
 

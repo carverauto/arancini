@@ -50,7 +50,7 @@ services:
     build: ..
     command: -v --kafka-brokers=10.0.0.100:9092 --curation-state-path=/app/state.bin
     ports:
-      - "8080:8080"
+      - "${RISOTTO_METRICS_PORT:-8080}:8080"
     networks:
       integration:
         ipv4_address: 10.0.0.99

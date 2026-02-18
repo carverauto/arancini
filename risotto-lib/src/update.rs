@@ -3,6 +3,7 @@ use bgpkit_parser::models::*;
 use chrono::{DateTime, TimeZone, Utc};
 use core::net::IpAddr;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,8 +32,11 @@ pub struct Update {
     pub is_adj_rib_out: bool,
     pub announced: bool,
     pub synthetic: bool,
+    pub attrs: Arc<UpdateAttributes>,
+}
 
-    // BGP Attributes
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UpdateAttributes {
     pub origin: String,
     pub as_path: Vec<u32>,
     pub next_hop: Option<IpAddr>,
@@ -51,6 +55,15 @@ pub struct Update {
     pub mp_reach_safi: Option<u8>,
     pub mp_unreach_afi: Option<u16>,
     pub mp_unreach_safi: Option<u8>,
+}
+
+impl UpdateAttributes {
+    pub fn synthetic_withdraw() -> Self {
+        Self {
+            origin: "INCOMPLETE".to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Update {
@@ -117,20 +130,7 @@ pub fn decode_updates(message: RouteMonitoring, metadata: UpdateMetadata) -> Opt
             Utc::now()
         });
 
-    // Create base update template to avoid repetition
-    let base_update = Update {
-        time_received_ns: Utc::now(),
-        time_bmp_header_ns,
-        router_addr: map_to_ipv6(metadata.router_socket.ip()),
-        router_port: metadata.router_socket.port(),
-        peer_addr: map_to_ipv6(metadata.peer_addr),
-        peer_bgp_id: metadata.peer_bgp_id,
-        peer_asn: metadata.peer_asn,
-        is_post_policy: metadata.is_post_policy,
-        is_adj_rib_out: metadata.is_adj_rib_out,
-        synthetic: false,
-
-        // BGP Attributes - simple types for easy serialization
+    let shared_attrs = Arc::new(UpdateAttributes {
         origin: attributes.origin().to_string(),
         as_path: new_path(attributes.as_path().cloned()),
         next_hop: attributes.next_hop().map(map_to_ipv6),
@@ -143,7 +143,7 @@ pub fn decode_updates(message: RouteMonitoring, metadata: UpdateMetadata) -> Opt
         communities: new_communities(&communities),
         extended_communities: extract_extended_communities(&communities),
         large_communities: extract_large_communities(&communities),
-        originator_id: attributes.origin_id().map(|id| u32::from(id)),
+        originator_id: attributes.origin_id().map(u32::from),
         cluster_list: attributes.clusters().map_or_else(Vec::new, |c| c.to_vec()),
         mp_reach_afi: attributes.get_reachable_nlri().map(|nlri| match nlri.afi {
             bgpkit_parser::models::Afi::Ipv4 => 1u16,
@@ -169,6 +169,21 @@ pub fn decode_updates(message: RouteMonitoring, metadata: UpdateMetadata) -> Opt
                 bgpkit_parser::models::Safi::Multicast => 2u8,
                 _ => 0u8,
             }),
+    });
+
+    // Create base update template to avoid repetition
+    let base_update = Update {
+        time_received_ns: Utc::now(),
+        time_bmp_header_ns,
+        router_addr: map_to_ipv6(metadata.router_socket.ip()),
+        router_port: metadata.router_socket.port(),
+        peer_addr: map_to_ipv6(metadata.peer_addr),
+        peer_bgp_id: metadata.peer_bgp_id,
+        peer_asn: metadata.peer_asn,
+        is_post_policy: metadata.is_post_policy,
+        is_adj_rib_out: metadata.is_adj_rib_out,
+        synthetic: false,
+        attrs: shared_attrs,
 
         // These will be overridden per prefix
         prefix_addr: std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
@@ -192,9 +207,7 @@ pub fn decode_updates(message: RouteMonitoring, metadata: UpdateMetadata) -> Opt
 
 pub fn new_metadata(socket: SocketAddr, message: &BmpMessage) -> Option<UpdateMetadata> {
     // Get peer information
-    let Some(pph) = message.per_peer_header else {
-        return None;
-    };
+    let pph = message.per_peer_header?;
     let peer = Peer::new(pph.peer_bgp_id, pph.peer_ip, pph.peer_asn);
 
     // Get header information
@@ -271,10 +284,9 @@ pub fn new_communities(communities: &[MetaCommunity]) -> Vec<(u32, u16)> {
 }
 
 pub fn map_to_ipv6(ip: IpAddr) -> IpAddr {
-    if ip.is_ipv4() {
-        format!("::ffff:{}", ip).parse().unwrap()
-    } else {
-        ip
+    match ip {
+        IpAddr::V4(v4) => IpAddr::V6(v4.to_ipv6_mapped()),
+        IpAddr::V6(v6) => IpAddr::V6(v6),
     }
 }
 

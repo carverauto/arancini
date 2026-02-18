@@ -48,6 +48,7 @@ impl UpdateSender for BridgeSender {
                 gauge!("risotto_arancini_bridge_queue_fill_ratio")
                     .set(self.tx.len() as f64 / capacity as f64);
             }
+            gauge!("risotto_arancini_bridge_queue_depth").set(self.tx.len() as f64);
             counter!("risotto_arancini_bridge_tx_total").increment(1);
             Ok(())
         })
@@ -78,6 +79,7 @@ pub(crate) async fn sidecar_forwarder(rx: BridgeRx, tx: Sender<Update>) -> Resul
             gauge!("risotto_arancini_bridge_queue_fill_ratio")
                 .set(rx.len() as f64 / capacity as f64);
         }
+        gauge!("risotto_arancini_bridge_queue_depth").set(rx.len() as f64);
     }
     Ok(())
 }
@@ -174,13 +176,17 @@ async fn nats_sidecar_publisher(rx: BridgeRx, cfg: NatsConfig) -> Result<()> {
             gauge!("risotto_arancini_bridge_queue_fill_ratio")
                 .set(rx.len() as f64 / capacity as f64);
         }
+        gauge!("risotto_arancini_bridge_queue_depth").set(rx.len() as f64);
 
         let subject = nats_subject_for_update(&cfg.subject, &update);
         let payload = serialize_update(&update);
         let enqueued_at = Instant::now();
+        let publish_start = Instant::now();
         match jetstream.publish(subject.clone(), payload.into()).await {
             Ok(ack) => {
                 counter!("risotto_arancini_nats_publish_enqueued_total").increment(1);
+                histogram!("risotto_arancini_nats_publish_enqueue_latency_seconds")
+                    .record(publish_start.elapsed().as_secs_f64());
                 in_flight_acks.push(Box::pin(async move {
                     let res = ack
                         .await
@@ -192,6 +198,8 @@ async fn nats_sidecar_publisher(rx: BridgeRx, cfg: NatsConfig) -> Result<()> {
             }
             Err(err) => {
                 counter!("risotto_arancini_nats_publish_errors_total").increment(1);
+                histogram!("risotto_arancini_nats_publish_enqueue_latency_seconds")
+                    .record(publish_start.elapsed().as_secs_f64());
                 error!(
                     "JetStream publish enqueue failed for subject {}: {}",
                     subject, err
@@ -289,9 +297,12 @@ pub(crate) fn spawn_nats_sidecar_thread(rx: BridgeRx, cfg: NatsConfig) -> Result
 mod tests {
     use super::*;
     use chrono::Utc;
+    use futures::FutureExt;
     use risotto_lib::update::UpdateAttributes;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio::time::{timeout, Duration};
 
     fn test_update(router_addr: IpAddr, prefix_addr: IpAddr, announced: bool) -> Update {
         Update {
@@ -358,5 +369,64 @@ mod tests {
 
         let subject = nats_subject_for_update("arancini.updates", &update);
         assert_eq!(subject, "arancini.updates.v6_0_0_0_0_0_0_0_1.64512.2_128");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn bridge_sender_applies_backpressure_when_bounded_queue_is_full() {
+        let (sender, rx) = bounded_channel(1);
+        sender
+            .send(test_update(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)),
+                true,
+            ))
+            .await
+            .expect("first send should succeed");
+
+        let mut second_send = sender.send(test_update(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 2)),
+            true,
+        ));
+        assert!(
+            second_send.as_mut().now_or_never().is_none(),
+            "second send should be pending while queue is full"
+        );
+
+        // Drain one item and ensure the pending sender can make progress.
+        let _ = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("drain should not timeout")
+            .expect("bridge receiver should still be open");
+        timeout(Duration::from_secs(1), second_send)
+            .await
+            .expect("second send completion should not timeout")
+            .expect("second send should succeed once capacity is available");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sidecar_forwarder_returns_error_if_downstream_channel_is_closed() {
+        let (bridge_tx, bridge_rx) = bounded_channel(4);
+        let (downstream_tx, downstream_rx) = mpsc::channel(1);
+        drop(downstream_rx);
+
+        let forwarder = tokio::spawn(sidecar_forwarder(bridge_rx, downstream_tx));
+        bridge_tx
+            .send(test_update(
+                IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10)),
+                IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
+                true,
+            ))
+            .await
+            .expect("bridge enqueue should succeed");
+
+        let result = timeout(Duration::from_secs(1), forwarder)
+            .await
+            .expect("forwarder completion should not timeout")
+            .expect("forwarder join should succeed");
+        assert!(
+            result.is_err(),
+            "forwarder should return error when downstream channel is closed"
+        );
     }
 }

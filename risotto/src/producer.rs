@@ -13,7 +13,7 @@ use tokio::sync::mpsc::Receiver;
 use tracing::{debug, error, trace};
 
 use crate::config::KafkaConfig;
-use crate::serializer::serialize_update;
+use crate::serializer::serialize_update_into;
 
 const MAX_IN_FLIGHT_BATCHES: usize = 64;
 
@@ -106,6 +106,7 @@ pub async fn handle(config: &KafkaConfig, mut rx: Receiver<Update>) -> Result<()
 
     // Send to Kafka
     let mut additional_message: Option<Vec<u8>> = None;
+    let mut serialized_update = Vec::with_capacity(1024);
     loop {
         while let Some(delivery_status) = in_flight.next().now_or_never().flatten() {
             record_delivery_status(delivery_status);
@@ -139,15 +140,15 @@ pub async fn handle(config: &KafkaConfig, mut rx: Receiver<Update>) -> Result<()
             trace!("{:?}", message);
 
             // Serialize the update
-            let message = serialize_update(&message);
+            serialize_update_into(&message, &mut serialized_update);
 
             // Max message size is 1048576 bytes (including headers)
-            if final_message.len() + message.len() > config.message_max_bytes {
-                additional_message = Some(message);
+            if final_message.len() + serialized_update.len() > config.message_max_bytes {
+                additional_message = Some(serialized_update.clone());
                 break;
             }
 
-            final_message.extend_from_slice(&message);
+            final_message.extend_from_slice(&serialized_update);
             n_messages += 1;
         }
 

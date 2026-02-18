@@ -6,26 +6,37 @@ use risotto_lib::update::Update;
 
 use crate::update_capnp::update;
 
-pub fn serialize_ip_addr(ip: IpAddr) -> Vec<u8> {
+pub fn serialize_ip_addr(ip: IpAddr) -> [u8; 16] {
     match ip {
-        IpAddr::V4(addr) => addr.to_ipv6_mapped().octets().to_vec(),
-        IpAddr::V6(addr) => addr.octets().to_vec(),
+        IpAddr::V4(addr) => addr.to_ipv6_mapped().octets(),
+        IpAddr::V6(addr) => addr.octets(),
     }
 }
 
-pub fn serialize_update(update: &Update) -> Vec<u8> {
+pub fn serialize_update_into(update: &Update, output: &mut Vec<u8>) {
     let attrs = update.attrs.as_ref();
+    output.clear();
+
+    let router_addr = serialize_ip_addr(update.router_addr);
+    let peer_addr = serialize_ip_addr(update.peer_addr);
+    let prefix_addr = serialize_ip_addr(update.prefix_addr);
+    let next_hop = serialize_ip_addr(
+        attrs
+            .next_hop
+            .unwrap_or(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)),
+    );
+
     let mut message = Builder::new_default();
     {
         let mut u = message.init_root::<update::Builder>();
         u.set_time_received_ns(update.time_received_ns.timestamp_nanos_opt().unwrap() as u64);
         u.set_time_bmp_header_ns(update.time_bmp_header_ns.timestamp_nanos_opt().unwrap() as u64);
-        u.set_router_addr(&serialize_ip_addr(update.router_addr));
+        u.set_router_addr(&router_addr);
         u.set_router_port(update.router_port);
-        u.set_peer_addr(&serialize_ip_addr(update.peer_addr));
+        u.set_peer_addr(&peer_addr);
         u.set_peer_bgp_id(update.peer_bgp_id.into());
         u.set_peer_asn(update.peer_asn);
-        u.set_prefix_addr(&serialize_ip_addr(update.prefix_addr));
+        u.set_prefix_addr(&prefix_addr);
         u.set_prefix_len(update.prefix_len);
         u.set_is_post_policy(update.is_post_policy);
         u.set_is_adj_rib_out(update.is_adj_rib_out);
@@ -42,10 +53,7 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         }
 
         // Next Hop
-        let next_hop = attrs
-            .next_hop
-            .unwrap_or(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED));
-        u.set_next_hop(&serialize_ip_addr(next_hop));
+        u.set_next_hop(&next_hop);
 
         // Multi Exit Discriminator
         u.set_multi_exit_disc(attrs.multi_exit_discriminator.unwrap_or(0));
@@ -129,5 +137,12 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         }
     }
 
-    serialize::write_message_to_words(&message)
+    serialize::write_message(&mut *output, &message)
+        .expect("serializing update into Vec<u8> should not fail");
+}
+
+pub fn serialize_update(update: &Update) -> Vec<u8> {
+    let mut output = Vec::with_capacity(1024);
+    serialize_update_into(update, &mut output);
+    output
 }

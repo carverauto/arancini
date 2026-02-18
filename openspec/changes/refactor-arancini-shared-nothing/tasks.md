@@ -23,18 +23,18 @@
 - [x] 1.6 Implement subject routing schema `arancini.updates.<router_ip>.<peer_asn>.<afi_safi>`.
 - [x] 1.7 Replace global curation lock path with per-core sharded RIB state and local dedup/synthetic-withdraw processing.
 - [x] 1.8 Implement periodic per-core snapshot persistence and startup restore (NATS KV bucket or NVMe store).
-- [ ] 1.9 Implement Cap'n Proto direct-to-buffer serialization path and remove avoidable hot-path allocations.
+- [x] 1.9 Implement Cap'n Proto direct-to-buffer serialization path and remove avoidable hot-path allocations.
 - [x] 1.10 Apply required socket options (`SO_REUSEPORT`, `TCP_NODELAY`) in runtime socket setup.
 - [x] 1.13 Add runtime-configurable listener backlog and ingest `SO_RCVBUF` controls; align defaults with documented host tuning.
-- [ ] 1.11 Add observability for queue depth, publish latency, ACK lag, per-core update throughput, and snapshot timing.
-- [ ] 1.12 Add migration notes for downstream systems moving from Kafka topics to JetStream subjects.
+- [x] 1.11 Add observability for queue depth, publish latency, ACK lag, per-core update throughput, and snapshot timing.
+- [x] 1.12 Add migration notes for downstream systems moving from Kafka topics to JetStream subjects.
 
 ## 2. Platform Tuning and Validation
-- [ ] 2.1 Add/extend tests for bridge backpressure, publish failure handling, and state ownership invariants.
-- [ ] 2.2 Add regression tests ensuring no lock is held across `.await` in curation/emit paths.
+- [x] 2.1 Add/extend tests for bridge backpressure, publish failure handling, and state ownership invariants.
+- [x] 2.2 Add regression tests ensuring no lock is held across `.await` in curation/emit paths.
 - [ ] 2.3 Run integration tests with multi-router BMP sessions and verify per-core deterministic ownership behavior.
 - [ ] 2.4 Run throughput benchmarks and verify near-linear scaling trend with additional cores.
 - [ ] 2.5 Verify hot-path allocation profile improves after framing and direct-to-buffer serialization changes.
 - [ ] 2.6 Validate host tuning guidance and runtime socket option enforcement on Linux (`sysctl`, fd limits, backlog, RSS/IRQ guidance).
 - [ ] 2.8 Validate backlog and receive-buffer socket tuning under burst BMP table-dump scenarios.
-- [ ] 2.7 Run `openspec validate refactor-arancini-shared-nothing --strict`.
+- [x] 2.7 Run `openspec validate refactor-arancini-shared-nothing --strict`.

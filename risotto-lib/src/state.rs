@@ -234,3 +234,164 @@ pub async fn process_update<T: StateStore, S: UpdateSender>(
 ) -> Result<()> {
     process_updates(state, tx, vec![update]).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state_store::memory::MemoryStore;
+    use chrono::Utc;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::{Notify, Semaphore};
+    use tokio::time::{sleep, timeout, Duration};
+
+    #[derive(Clone)]
+    struct BlockingSender {
+        started: Arc<Notify>,
+        release: Arc<Semaphore>,
+        sent: Arc<AtomicUsize>,
+    }
+
+    impl Default for BlockingSender {
+        fn default() -> Self {
+            Self {
+                started: Arc::new(Notify::new()),
+                release: Arc::new(Semaphore::new(0)),
+                sent: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    impl BlockingSender {
+        async fn wait_for_send_start(&self) {
+            self.started.notified().await;
+        }
+
+        fn release_one_send(&self) {
+            self.release.add_permits(1);
+        }
+
+        fn sent_count(&self) -> usize {
+            self.sent.load(Ordering::Relaxed)
+        }
+    }
+
+    impl UpdateSender for BlockingSender {
+        fn send<'a>(
+            &'a self,
+            _update: Update,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+            Box::pin(async move {
+                self.sent.fetch_add(1, Ordering::Relaxed);
+                self.started.notify_waiters();
+                let _permit = self
+                    .release
+                    .acquire()
+                    .await
+                    .map_err(|_| anyhow::anyhow!("blocking sender gate closed"))?;
+                Ok(())
+            })
+        }
+    }
+
+    fn test_update(router: IpAddr, peer: IpAddr, prefix: IpAddr, announced: bool) -> Update {
+        Update {
+            time_received_ns: Utc::now(),
+            time_bmp_header_ns: Utc::now(),
+            router_addr: map_to_ipv6(router),
+            router_port: 4000,
+            peer_addr: map_to_ipv6(peer),
+            peer_bgp_id: Ipv4Addr::new(203, 0, 113, 1),
+            peer_asn: 64512,
+            prefix_addr: map_to_ipv6(prefix),
+            prefix_len: 24,
+            is_post_policy: false,
+            is_adj_rib_out: false,
+            announced,
+            synthetic: false,
+            attrs: Arc::new(UpdateAttributes::default()),
+        }
+    }
+
+    fn test_metadata(router: IpAddr, peer: IpAddr) -> UpdateMetadata {
+        UpdateMetadata {
+            time_bmp_header_ns: Utc::now().timestamp_millis(),
+            router_socket: SocketAddr::new(router, 4000),
+            peer_addr: peer,
+            peer_bgp_id: Ipv4Addr::new(203, 0, 113, 1),
+            peer_asn: 64512,
+            is_post_policy: false,
+            is_adj_rib_out: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn process_updates_releases_state_lock_before_send_await() {
+        let state = new_state(MemoryStore::new());
+        let sender = BlockingSender::default();
+        let update = test_update(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 0)),
+            true,
+        );
+
+        let worker_state = state.clone();
+        let worker_sender = sender.clone();
+        let task = tokio::spawn(async move {
+            process_updates(Some(worker_state), worker_sender, vec![update]).await
+        });
+
+        timeout(Duration::from_secs(1), sender.wait_for_send_start())
+            .await
+            .expect("send path should be reached");
+        let lock_attempt = timeout(Duration::from_secs(1), state.lock())
+            .await
+            .expect("state lock attempt should not time out");
+        drop(lock_attempt);
+
+        sender.release_one_send();
+        task.await
+            .expect("process_updates task should complete")
+            .expect("process_updates should succeed");
+        assert_eq!(sender.sent_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn peer_up_withdraw_handler_releases_state_lock_before_send_await() {
+        let router = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20));
+        let peer = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20));
+        let prefix = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 20));
+        let state = new_state(MemoryStore::new());
+        let sender = BlockingSender::default();
+
+        {
+            let mut lock = state.lock().await;
+            let update = test_update(router, peer, prefix, true);
+            lock.store.update(&router, &peer, &update);
+        }
+        // Ensure stored prefix timestamp is older than handler startup timestamp.
+        sleep(Duration::from_millis(5)).await;
+
+        let metadata = test_metadata(router, peer);
+        let worker_state = state.clone();
+        let worker_sender = sender.clone();
+        let task = tokio::spawn(async move {
+            peer_up_withdraws_handler(worker_state, worker_sender, metadata, 0).await
+        });
+
+        timeout(Duration::from_secs(1), sender.wait_for_send_start())
+            .await
+            .expect("stale withdraw send should begin");
+        let lock_attempt = timeout(Duration::from_secs(1), state.lock())
+            .await
+            .expect("state lock attempt should not time out");
+        drop(lock_attempt);
+
+        sender.release_one_send();
+        task.await
+            .expect("peer_up_withdraws_handler task should complete")
+            .expect("peer_up_withdraws_handler should succeed");
+        assert_eq!(sender.sent_count(), 1);
+    }
+}

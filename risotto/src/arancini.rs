@@ -72,6 +72,7 @@ impl SnapshotBridge {
             gauge!("risotto_arancini_snapshot_queue_fill_ratio")
                 .set(self.tx.len() as f64 / capacity as f64);
         }
+        gauge!("risotto_arancini_snapshot_queue_depth").set(self.tx.len() as f64);
         Ok(())
     }
 
@@ -88,6 +89,7 @@ impl SnapshotBridge {
             gauge!("risotto_arancini_snapshot_queue_fill_ratio")
                 .set(self.tx.len() as f64 / capacity as f64);
         }
+        gauge!("risotto_arancini_snapshot_queue_depth").set(self.tx.len() as f64);
         match reply_rx.await {
             Ok(Ok(payload)) => Ok(payload),
             Ok(Err(err)) => Err(anyhow::anyhow!("{}", err)),
@@ -655,7 +657,8 @@ async fn handle_connection<S: UpdateSender>(
                 packet_length
             );
             let mut bytes = frame_buffer.split_to(packet_length).freeze();
-            process_bmp_message_shard(shard.clone(), tx.clone(), socket, &mut bytes).await?;
+            process_bmp_message_shard(shard.clone(), tx.clone(), worker_id, socket, &mut bytes)
+                .await?;
         }
 
         if frame_buffer.len() > cfg.arancini_max_frame_size_bytes {
@@ -917,6 +920,7 @@ async fn worker_snapshot_loop_local(
     shard: WorkerShardState,
     cfg: CurationConfig,
 ) {
+    let worker_label = worker_id.to_string();
     let interval_secs = cfg.state_save_interval.max(1);
     loop {
         sleep(Duration::from_secs(interval_secs)).await;
@@ -924,8 +928,10 @@ async fn worker_snapshot_loop_local(
         match dump_worker_shard_snapshot_local(&shard, worker_id, &cfg).await {
             Ok(()) => {
                 counter!("risotto_state_dump_total").increment(1);
-                histogram!("risotto_state_dump_duration_seconds")
-                    .record(start.elapsed().as_secs_f64());
+                let elapsed = start.elapsed().as_secs_f64();
+                histogram!("risotto_state_dump_duration_seconds").record(elapsed);
+                histogram!("risotto_arancini_snapshot_duration_seconds", "worker" => worker_label.clone())
+                    .record(elapsed);
                 trace!(
                     "arancini worker {} persisted shard snapshot to {}",
                     worker_id,
@@ -948,6 +954,7 @@ async fn worker_snapshot_loop_nats(
     cfg: CurationConfig,
     bridge: SnapshotBridge,
 ) {
+    let worker_label = worker_id.to_string();
     let interval_secs = cfg.state_save_interval.max(1);
     loop {
         sleep(Duration::from_secs(interval_secs)).await;
@@ -955,8 +962,10 @@ async fn worker_snapshot_loop_nats(
         match dump_worker_shard_snapshot_nats(&shard, worker_id, &bridge).await {
             Ok(()) => {
                 counter!("risotto_state_dump_total").increment(1);
-                histogram!("risotto_state_dump_duration_seconds")
-                    .record(start.elapsed().as_secs_f64());
+                let elapsed = start.elapsed().as_secs_f64();
+                histogram!("risotto_state_dump_duration_seconds").record(elapsed);
+                histogram!("risotto_arancini_snapshot_duration_seconds", "worker" => worker_label.clone())
+                    .record(elapsed);
                 trace!(
                     "arancini worker {} enqueued shard snapshot to NATS backend",
                     worker_id
@@ -1071,6 +1080,7 @@ async fn snapshot_sidecar_loop(
             gauge!("risotto_arancini_snapshot_queue_fill_ratio")
                 .set(rx.len() as f64 / capacity as f64);
         }
+        gauge!("risotto_arancini_snapshot_queue_depth").set(rx.len() as f64);
 
         match command {
             SnapshotCommand::Persist { worker_id, payload } => {
@@ -1187,11 +1197,15 @@ fn curate_updates_in_shard(shard: &WorkerShardState, updates: Vec<Update>) -> Re
 async fn process_route_monitoring_shard<S: UpdateSender>(
     shard: Option<WorkerShardState>,
     tx: S,
+    worker_id: usize,
     metadata: UpdateMetadata,
     body: RouteMonitoring,
 ) -> Result<()> {
     let updates = decode_updates(body, metadata).unwrap_or_default();
-    counter!("risotto_rx_updates_total").increment(updates.len() as u64);
+    let update_count = updates.len() as u64;
+    counter!("risotto_rx_updates_total").increment(update_count);
+    counter!("risotto_arancini_worker_rx_updates_total", "worker" => worker_id.to_string())
+        .increment(update_count);
 
     if updates.is_empty() {
         return Ok(());
@@ -1202,10 +1216,14 @@ async fn process_route_monitoring_shard<S: UpdateSender>(
         None => updates,
     };
 
+    let mut sent_updates = 0_u64;
     for update in to_emit {
         tx.send(update).await?;
-        counter!("risotto_tx_updates_total").increment(1);
+        sent_updates += 1;
     }
+    counter!("risotto_tx_updates_total").increment(sent_updates);
+    counter!("risotto_arancini_worker_tx_updates_total", "worker" => worker_id.to_string())
+        .increment(sent_updates);
 
     Ok(())
 }
@@ -1213,6 +1231,7 @@ async fn process_route_monitoring_shard<S: UpdateSender>(
 async fn process_peer_up_shard<S: UpdateSender>(
     shard: Option<WorkerShardState>,
     tx: S,
+    worker_id: usize,
     metadata: UpdateMetadata,
 ) -> Result<()> {
     if let Some(shard) = shard {
@@ -1232,7 +1251,8 @@ async fn process_peer_up_shard<S: UpdateSender>(
         let spawn_tx = tx.clone();
         monoio::spawn(async move {
             if let Err(err) =
-                peer_up_withdraws_handler_shard(spawn_shard, spawn_tx, metadata, 300).await
+                peer_up_withdraws_handler_shard(spawn_shard, spawn_tx, worker_id, metadata, 300)
+                    .await
             {
                 error!("arancini peer_up stale-withdraw handler failed: {}", err);
             }
@@ -1245,6 +1265,7 @@ async fn process_peer_up_shard<S: UpdateSender>(
 async fn peer_up_withdraws_handler_shard<S: UpdateSender>(
     shard: WorkerShardState,
     tx: S,
+    worker_id: usize,
     metadata: UpdateMetadata,
     sleep_time: u64,
 ) -> Result<()> {
@@ -1261,7 +1282,10 @@ async fn peer_up_withdraws_handler_shard<S: UpdateSender>(
             .collect::<Vec<_>>()
     };
 
-    counter!("risotto_tx_updates_total").increment(stale_prefixes.len() as u64);
+    let stale_count = stale_prefixes.len() as u64;
+    counter!("risotto_tx_updates_total").increment(stale_count);
+    counter!("risotto_arancini_worker_tx_updates_total", "worker" => worker_id.to_string())
+        .increment(stale_count);
 
     for prefix in &stale_prefixes {
         let update = synthesize_withdraw_update(prefix, metadata.clone());
@@ -1284,6 +1308,7 @@ async fn peer_up_withdraws_handler_shard<S: UpdateSender>(
 async fn process_peer_down_shard<S: UpdateSender>(
     shard: Option<WorkerShardState>,
     tx: S,
+    worker_id: usize,
     metadata: UpdateMetadata,
     _: PeerDownNotification,
 ) -> Result<()> {
@@ -1307,7 +1332,10 @@ async fn process_peer_down_shard<S: UpdateSender>(
         )
         .set(0);
 
-        counter!("risotto_tx_updates_total").increment(synthetic_updates.len() as u64);
+        let synthetic_count = synthetic_updates.len() as u64;
+        counter!("risotto_tx_updates_total").increment(synthetic_count);
+        counter!("risotto_arancini_worker_tx_updates_total", "worker" => worker_id.to_string())
+            .increment(synthetic_count);
         for update in synthetic_updates {
             tx.send(update).await?;
         }
@@ -1319,6 +1347,7 @@ async fn process_peer_down_shard<S: UpdateSender>(
 async fn process_bmp_message_shard<S: UpdateSender>(
     shard: Option<WorkerShardState>,
     tx: S,
+    worker_id: usize,
     socket: SocketAddr,
     bytes: &mut bytes::Bytes,
 ) -> Result<()> {
@@ -1340,7 +1369,7 @@ async fn process_bmp_message_shard<S: UpdateSender>(
             })?;
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_up_notification")
                 .increment(1);
-            process_peer_up_shard(shard, tx, metadata).await?;
+            process_peer_up_shard(shard, tx, worker_id, metadata).await?;
         }
         BmpMessageBody::RouteMonitoring(body) => {
             trace!("{}: {:?}", socket, body);
@@ -1350,7 +1379,7 @@ async fn process_bmp_message_shard<S: UpdateSender>(
             if !metadata.peer_addr.is_unspecified() {
                 counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "route_monitoring")
                     .increment(1);
-                process_route_monitoring_shard(shard, tx, metadata, body).await?;
+                process_route_monitoring_shard(shard, tx, worker_id, metadata, body).await?;
             }
         }
         BmpMessageBody::RouteMirroring(body) => {
@@ -1365,7 +1394,7 @@ async fn process_bmp_message_shard<S: UpdateSender>(
             })?;
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_down_notification")
                 .increment(1);
-            process_peer_down_shard(shard, tx, metadata, body).await?;
+            process_peer_down_shard(shard, tx, worker_id, metadata, body).await?;
         }
         BmpMessageBody::TerminationMessage(body) => {
             trace!("{}: {:?}", socket, body);
@@ -1385,6 +1414,99 @@ async fn process_bmp_message_shard<S: UpdateSender>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bgpkit_parser::bmp::messages::PeerDownReason;
+    use chrono::Utc;
+    use risotto_lib::update::{UpdateAttributes, UpdateMetadata};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::{Notify, Semaphore};
+    use tokio::time::{timeout, Duration};
+
+    #[derive(Clone)]
+    struct BlockingSender {
+        started: Arc<Notify>,
+        release: Arc<Semaphore>,
+        sent: Arc<AtomicUsize>,
+    }
+
+    impl Default for BlockingSender {
+        fn default() -> Self {
+            Self {
+                started: Arc::new(Notify::new()),
+                release: Arc::new(Semaphore::new(0)),
+                sent: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    impl BlockingSender {
+        async fn wait_for_send_start(&self) {
+            self.started.notified().await;
+        }
+
+        fn release_one_send(&self) {
+            self.release.add_permits(1);
+        }
+
+        fn sent_count(&self) -> usize {
+            self.sent.load(Ordering::Relaxed)
+        }
+    }
+
+    impl UpdateSender for BlockingSender {
+        fn send<'a>(
+            &'a self,
+            _update: Update,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+            Box::pin(async move {
+                self.sent.fetch_add(1, Ordering::Relaxed);
+                self.started.notify_waiters();
+                let _permit = self
+                    .release
+                    .acquire()
+                    .await
+                    .map_err(|_| anyhow::anyhow!("blocking sender gate closed"))?;
+                Ok(())
+            })
+        }
+    }
+
+    fn test_metadata(router: IpAddr, peer: IpAddr) -> UpdateMetadata {
+        UpdateMetadata {
+            time_bmp_header_ns: Utc::now().timestamp_millis(),
+            router_socket: SocketAddr::new(router, 4000),
+            peer_addr: peer,
+            peer_bgp_id: Ipv4Addr::new(198, 51, 100, 1),
+            peer_asn: 64512,
+            is_post_policy: false,
+            is_adj_rib_out: false,
+        }
+    }
+
+    fn insert_announced_prefix(shard: &WorkerShardState, metadata: &UpdateMetadata) {
+        let mut state = lock_worker_shard(shard).expect("worker shard lock must be available");
+        let update = Update {
+            time_received_ns: Utc::now(),
+            time_bmp_header_ns: Utc::now(),
+            router_addr: risotto_lib::update::map_to_ipv6(metadata.router_socket.ip()),
+            router_port: metadata.router_socket.port(),
+            peer_addr: risotto_lib::update::map_to_ipv6(metadata.peer_addr),
+            peer_bgp_id: metadata.peer_bgp_id,
+            peer_asn: metadata.peer_asn,
+            prefix_addr: risotto_lib::update::map_to_ipv6(IpAddr::V4(Ipv4Addr::new(
+                203, 0, 113, 0,
+            ))),
+            prefix_len: 24,
+            is_post_policy: false,
+            is_adj_rib_out: false,
+            announced: true,
+            synthetic: false,
+            attrs: Arc::new(UpdateAttributes::default()),
+        };
+        state
+            .store
+            .update(&metadata.router_socket.ip(), &metadata.peer_addr, &update);
+    }
 
     fn build_test_bmp_packet(payload_len: usize) -> Vec<u8> {
         let len = BMP_COMMON_HEADER_LEN + payload_len;
@@ -1477,5 +1599,107 @@ mod tests {
             registry.assert_owner(router_ip, 3).is_err(),
             "ownership should be removed after final claim drops"
         );
+    }
+
+    #[test]
+    fn session_owner_registry_wrong_worker_release_does_not_drop_ownership() {
+        let registry = SessionOwnerRegistry::default();
+        let router_ip: IpAddr = "203.0.113.90".parse().unwrap();
+
+        let guard = registry.claim(router_ip, 7).unwrap();
+        registry.release(router_ip, 8);
+        assert!(
+            registry.assert_owner(router_ip, 7).is_ok(),
+            "release from non-owner worker must not clear ownership"
+        );
+
+        drop(guard);
+        assert!(
+            registry.assert_owner(router_ip, 7).is_err(),
+            "ownership should clear only after valid owner release"
+        );
+    }
+
+    #[test]
+    fn session_owner_registry_multi_router_ownership_is_sticky_until_release() {
+        let registry = SessionOwnerRegistry::default();
+        let router_a: IpAddr = "192.0.2.101".parse().unwrap();
+        let router_b: IpAddr = "192.0.2.102".parse().unwrap();
+        let router_c: IpAddr = "192.0.2.103".parse().unwrap();
+
+        let a_owner = registry.claim(router_a, 0).unwrap();
+        let b_owner = registry.claim(router_b, 1).unwrap();
+        let c_owner = registry.claim(router_c, 0).unwrap();
+
+        assert!(
+            registry.claim(router_a, 1).is_err(),
+            "router A ownership must remain pinned to worker 0"
+        );
+        assert!(
+            registry.claim(router_b, 0).is_err(),
+            "router B ownership must remain pinned to worker 1"
+        );
+        assert!(
+            registry.assert_owner(router_a, 0).is_ok()
+                && registry.assert_owner(router_b, 1).is_ok()
+                && registry.assert_owner(router_c, 0).is_ok(),
+            "all routers should report their claimed workers"
+        );
+
+        drop(a_owner);
+        assert!(
+            registry.claim(router_a, 1).is_ok(),
+            "router A can move workers only after full release"
+        );
+
+        drop(b_owner);
+        drop(c_owner);
+    }
+
+    #[tokio::test]
+    async fn process_peer_down_shard_releases_lock_before_send_await() {
+        let metadata = test_metadata(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 40)),
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 40)),
+        );
+        let shard = Arc::new(Mutex::new(State::new(MemoryStore::new())));
+        insert_announced_prefix(&shard, &metadata);
+        let sender = BlockingSender::default();
+
+        let worker_shard = shard.clone();
+        let worker_sender = sender.clone();
+        let worker_metadata = metadata.clone();
+        let task = tokio::spawn(async move {
+            process_peer_down_shard(
+                Some(worker_shard),
+                worker_sender,
+                0,
+                worker_metadata,
+                PeerDownNotification {
+                    reason: PeerDownReason::RemoteSystemsClosedNoData,
+                    data: None,
+                },
+            )
+            .await
+        });
+
+        timeout(Duration::from_secs(1), sender.wait_for_send_start())
+            .await
+            .expect("synthetic withdraw send should begin");
+        let lock_shard = shard.clone();
+        let lock_check =
+            tokio::task::spawn_blocking(move || lock_worker_shard(&lock_shard).map(|_| ()));
+        let lock_result = timeout(Duration::from_secs(1), lock_check)
+            .await
+            .expect("lock check should not block");
+        lock_result
+            .expect("lock check task should not panic")
+            .expect("worker shard lock should be acquirable while send awaits");
+
+        sender.release_one_send();
+        task.await
+            .expect("process_peer_down_shard task should complete")
+            .expect("process_peer_down_shard should succeed");
+        assert_eq!(sender.sent_count(), 1);
     }
 }

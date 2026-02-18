@@ -316,8 +316,16 @@ fn set_metrics(metrics_address: SocketAddr) {
         "Current fill ratio of the Arancini monoio->tokio bridge queue"
     );
     metrics::describe_gauge!(
+        "risotto_arancini_bridge_queue_depth",
+        "Current depth of the Arancini monoio->tokio bridge queue"
+    );
+    metrics::describe_gauge!(
         "risotto_arancini_snapshot_queue_fill_ratio",
         "Current fill ratio of the Arancini snapshot command queue"
+    );
+    metrics::describe_gauge!(
+        "risotto_arancini_snapshot_queue_depth",
+        "Current depth of the Arancini snapshot command queue"
     );
     metrics::describe_counter!(
         "risotto_arancini_snapshot_persist_total",
@@ -332,8 +340,24 @@ fn set_metrics(metrics_address: SocketAddr) {
         "Total number of shard snapshot backend errors"
     );
     metrics::describe_counter!(
+        "risotto_arancini_worker_rx_updates_total",
+        "Total number of updates decoded per Arancini worker"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_worker_tx_updates_total",
+        "Total number of emitted updates per Arancini worker"
+    );
+    metrics::describe_histogram!(
+        "risotto_arancini_snapshot_duration_seconds",
+        "Elapsed seconds to complete per-worker shard snapshot persistence"
+    );
+    metrics::describe_counter!(
         "risotto_arancini_nats_publish_enqueued_total",
         "Total number of updates enqueued for JetStream publish"
+    );
+    metrics::describe_histogram!(
+        "risotto_arancini_nats_publish_enqueue_latency_seconds",
+        "Elapsed seconds to enqueue JetStream publish requests"
     );
     metrics::describe_counter!(
         "risotto_arancini_nats_publish_errors_total",

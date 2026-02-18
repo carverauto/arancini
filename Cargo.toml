@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["risotto", "risotto-lib"]
+members = ["arancini", "arancini-lib"]
 
 [workspace.package]
 version = "0.7.0"
 license = "MIT"
 readme = "README.md"
 description = "High-performance BMP collector"
-repository = "https://github.com/nxthdr/risotto"
+repository = "https://github.com/carverauto/arancini"
 homepage = "https://nxthdr.dev"
 keywords = ["BGP", "BMP", "collector"]
 exclude = [

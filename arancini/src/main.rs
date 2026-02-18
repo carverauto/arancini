@@ -14,7 +14,7 @@ use tokio::sync::mpsc::{channel, Receiver};
 use tokio_graceful::Shutdown;
 use tracing::{debug, error, trace, warn};
 
-use risotto_lib::update::Update;
+use arancini_lib::update::Update;
 
 use crate::bridge::BridgeSender;
 use crate::config::{configure, AppConfig};

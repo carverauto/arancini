@@ -22,7 +22,7 @@ This repository contains:
 - Streaming: `rdkafka` (Kafka/Redpanda producer)
 - Serialization:
   - State snapshots: `postcard`
-  - Update payload schema: Cap'n Proto (`risotto/schemas/update.capnp`)
+  - Update payload schema: Cap'n Proto (`arancini/schemas/update.capnp`)
 - Observability:
   - Logging: `tracing` + `tracing-subscriber`
   - Metrics: `metrics` + `metrics-exporter-prometheus`
@@ -62,14 +62,14 @@ This repository contains:
   - Periodic snapshot/restore via postcard file (`state.bin` by default)
 - Serialization model:
   - Internal update representation in Rust structs (`risotto-lib::update::Update`)
-  - Wire payloads encoded with Cap'n Proto schema from `risotto/schemas/update.capnp`
+  - Wire payloads encoded with Cap'n Proto schema from `arancini/schemas/update.capnp`
 
 ### Testing Strategy
 - CI baseline:
   - `cargo check --locked`
   - `cargo test --locked --verbose`
 - Library tests:
-  - Async unit/integration-style tests in `risotto-lib/tests/`
+  - Async unit/integration-style tests in `arancini-lib/tests/`
   - Cover BMP processor paths such as peer up/down and route monitoring
 - System/integration environment:
   - `integration/compose.yml` stands up GoBGP, BIRD, Risotto, Redpanda, and ClickHouse

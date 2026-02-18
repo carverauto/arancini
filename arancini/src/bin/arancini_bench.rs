@@ -6,9 +6,9 @@ mod update_capnp;
 use bytes::BytesMut;
 use chrono::Utc;
 use core_affinity::CoreId;
-use risotto_lib::state::State;
-use risotto_lib::state_store::memory::MemoryStore;
-use risotto_lib::update::{map_to_ipv6, Update, UpdateAttributes};
+use arancini_lib::state::State;
+use arancini_lib::state_store::memory::MemoryStore;
+use arancini_lib::update::{map_to_ipv6, Update, UpdateAttributes};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::net::{IpAddr, Ipv4Addr};
@@ -416,7 +416,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: cargo run --release -p risotto --bin arancini_bench -- [throughput|alloc|all]"
+                "usage: cargo run --release -p arancini --bin arancini_bench -- [throughput|alloc|all]"
             );
             std::process::exit(2);
         }

@@ -10,10 +10,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::channel;
 
-use risotto_lib::processor::{peer_down_notification, peer_up_notification, route_monitoring};
-use risotto_lib::state::new_state;
-use risotto_lib::state_store::memory::MemoryStore;
-use risotto_lib::update::{Update, UpdateAttributes, UpdateMetadata};
+use arancini_lib::processor::{peer_down_notification, peer_up_notification, route_monitoring};
+use arancini_lib::state::new_state;
+use arancini_lib::state_store::memory::MemoryStore;
+use arancini_lib::update::{Update, UpdateAttributes, UpdateMetadata};
 
 fn default_open_message() -> BgpOpenMessage {
     BgpOpenMessage {

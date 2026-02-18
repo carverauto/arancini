@@ -24,6 +24,7 @@ pub enum RuntimeMode {
 pub struct RuntimeConfig {
     pub mode: RuntimeMode,
     pub arancini_workers: usize,
+    pub arancini_bridge_buffer_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,10 @@ pub struct Cli {
     /// Number of monoio worker threads used by Arancini runtime mode
     #[arg(long, default_value_t = num_cpus::get())]
     pub arancini_workers: usize,
+
+    /// Buffer capacity for Arancini monoio->tokio bridge channel
+    #[arg(long, default_value_t = 100000)]
+    pub arancini_bridge_buffer_size: usize,
 
     /// BMP listener address (IP or FQDN)
     #[arg(long, default_value = "0.0.0.0:4000")]
@@ -219,6 +224,38 @@ fn set_metrics(metrics_address: SocketAddr) {
         "risotto_arancini_ingest_frame_buffer_growth_total",
         "Number of Arancini ingest frame-buffer capacity growth events"
     );
+    metrics::describe_counter!(
+        "risotto_arancini_session_claim_total",
+        "Total number of Arancini router-session ownership claims"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_session_release_total",
+        "Total number of Arancini router-session ownership releases"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_session_ownership_conflicts_total",
+        "Total number of Arancini router-session ownership conflicts across workers"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_session_duplicate_claims_total",
+        "Total number of duplicate Arancini router-session claims by the same worker"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_session_ownership_assert_failures_total",
+        "Total number of Arancini router-session ownership assertion failures"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_bridge_tx_total",
+        "Total number of updates sent into the Arancini monoio->tokio bridge"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_bridge_rx_total",
+        "Total number of updates drained from the Arancini monoio->tokio bridge"
+    );
+    metrics::describe_gauge!(
+        "risotto_arancini_bridge_queue_fill_ratio",
+        "Current fill ratio of the Arancini monoio->tokio bridge queue"
+    );
 }
 
 pub async fn resolve_address(address: String) -> Result<SocketAddr> {
@@ -260,6 +297,7 @@ pub async fn configure() -> Result<AppConfig> {
         runtime: RuntimeConfig {
             mode: cli.runtime_mode,
             arancini_workers: cli.arancini_workers,
+            arancini_bridge_buffer_size: cli.arancini_bridge_buffer_size,
         },
         bmp: BMPConfig {
             host: bmp_addr,

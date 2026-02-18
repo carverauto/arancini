@@ -34,10 +34,9 @@ Hot-path profiling and code review found several pre-existing failure modes in t
    - No global mutex around all router/peer state.
 
 4. **NATS Bridge and Sidecar**
-   - Worker serializes update and pushes bytes into bounded lock-free MPSC channel.
+   - Worker serializes update and pushes bytes into bounded lock-free `crossfire` MPSC channel.
    - Dedicated Tokio sidecar owns NATS JetStream client and publish pipeline.
    - Sidecar handles server ACK futures asynchronously to keep worker hot path non-blocking.
-   - Bridge channel crate is selected by bakeoff (`kanal` vs `crossfire`) under Arancini load.
 
 ## Baseline Hot-Path Remediation (Phase 0)
 Before or in parallel with full Arancini cutover, the implementation must remove current-path bottlenecks:

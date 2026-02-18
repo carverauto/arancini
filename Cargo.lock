@@ -536,6 +536,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "crossfire"
+version = "3.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4150133c3f558d3190b52a4d36b571e29c18a24e98d24d12201bed0c038986f8"
+dependencies = [
+ "crossbeam-utils",
+ "futures-core",
+ "parking_lot",
+ "smallvec",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2098,6 +2110,7 @@ dependencies = [
  "clap",
  "clap-verbosity-flag",
  "core_affinity",
+ "crossfire",
  "futures",
  "metrics",
  "metrics-exporter-prometheus",

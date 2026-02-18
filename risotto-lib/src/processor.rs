@@ -5,13 +5,13 @@ use bgpkit_parser::parser::bmp::messages::BmpMessage;
 use bytes::Bytes;
 use metrics::{counter, gauge};
 use rand::Rng;
-use tokio::sync::mpsc::Sender;
 use tracing::{error, trace};
 
+use crate::sender::UpdateSender;
 use crate::state::AsyncState;
 use crate::state::{peer_up_withdraws_handler, process_updates, synthesize_withdraw_update};
 use crate::state_store::store::StateStore;
-use crate::update::{decode_updates, Update, UpdateMetadata};
+use crate::update::{decode_updates, UpdateMetadata};
 
 pub fn decode_bmp_message(bytes: &mut Bytes) -> Result<BmpMessage> {
     let message = match parse_bmp_msg(bytes) {
@@ -22,9 +22,9 @@ pub fn decode_bmp_message(bytes: &mut Bytes) -> Result<BmpMessage> {
     Ok(message)
 }
 
-pub async fn peer_up_notification<T: StateStore>(
+pub async fn peer_up_notification<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     metadata: UpdateMetadata,
     _: PeerUpNotification,
 ) -> Result<()> {
@@ -59,9 +59,9 @@ pub async fn peer_up_notification<T: StateStore>(
     Ok(())
 }
 
-pub async fn route_monitoring<T: StateStore>(
+pub async fn route_monitoring<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     metadata: UpdateMetadata,
     body: RouteMonitoring,
 ) -> Result<()> {
@@ -76,9 +76,9 @@ pub async fn route_monitoring<T: StateStore>(
     Ok(())
 }
 
-pub async fn peer_down_notification<T: StateStore>(
+pub async fn peer_down_notification<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     metadata: UpdateMetadata,
     _: PeerDownNotification,
 ) -> Result<()> {

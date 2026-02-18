@@ -17,9 +17,8 @@
 - [x] 1.2.2 Implement non-spinning framed monoio read loop (no peek loop) that recycles slots after parse completion.
 - [x] 1.2.3 Verify steady-state ingest avoids per-message allocations in the worker hot path.
 - [ ] 1.2.4 Evaluate/implement kernel-registered buffer-select (`ProvideBuffers`/`BUFFER_SELECT`) path once runtime support is available (or via custom ingress driver).
-- [ ] 1.3 Ensure deterministic session-to-core ownership for BMP connections and prohibit cross-core RIB mutation.
-- [ ] 1.4 Build bounded lock-free MPSC bridge from monoio workers to a dedicated Tokio NATS sidecar thread.
-- [ ] 1.4.1 Run bridge channel bakeoff (`kanal` vs `crossfire`) with Arancini payload/backpressure profile and record default choice.
+- [x] 1.3 Ensure deterministic session-to-core ownership for BMP connections and prohibit cross-core RIB mutation.
+- [x] 1.4 Build bounded lock-free MPSC bridge from monoio workers to a dedicated Tokio NATS sidecar thread.
 - [ ] 1.5 Implement NATS JetStream async publish path with non-blocking ACK handling and error metrics.
 - [ ] 1.6 Implement subject routing schema `arancini.updates.<router_ip>.<peer_asn>.<afi_safi>`.
 - [ ] 1.7 Replace global curation lock path with per-core sharded RIB state and local dedup/synthetic-withdraw processing.

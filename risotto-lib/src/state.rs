@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tracing::{debug, trace};
 
+use crate::sender::UpdateSender;
 use crate::state_store::store::StateStore;
 use crate::update::{map_to_ipv6, Update, UpdateAttributes, UpdateMetadata};
 
@@ -120,9 +120,9 @@ pub fn synthesize_withdraw_update(prefix: &TimedPrefix, metadata: UpdateMetadata
     }
 }
 
-pub async fn peer_up_withdraws_handler<T: StateStore>(
+pub async fn peer_up_withdraws_handler<T: StateStore, S: UpdateSender>(
     state: AsyncState<T>,
-    tx: Sender<Update>,
+    tx: S,
     metadata: UpdateMetadata,
     sleep_time: u64,
 ) -> Result<()> {
@@ -177,9 +177,9 @@ pub async fn peer_up_withdraws_handler<T: StateStore>(
 
 /// Process pre-parsed updates through the state machine
 /// This is the core processing logic used by both collectors and curators
-pub async fn process_updates<T: StateStore>(
+pub async fn process_updates<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     updates: Vec<Update>,
 ) -> Result<()> {
     if updates.is_empty() {
@@ -227,9 +227,9 @@ pub async fn process_updates<T: StateStore>(
 
 /// Process a single pre-parsed update through the state machine
 /// Convenience wrapper for single update processing
-pub async fn process_update<T: StateStore>(
+pub async fn process_update<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     update: Update,
 ) -> Result<()> {
     process_updates(state, tx, vec![update]).await

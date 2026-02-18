@@ -1,18 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Monoio-to-Tokio Bridge
-The system SHALL bridge worker output from monoio ingest threads to a dedicated Tokio NATS sidecar using a bounded lock-free MPSC channel.
+The system SHALL bridge worker output from monoio ingest threads to a dedicated Tokio NATS sidecar using a bounded lock-free `crossfire` MPSC channel.
 
 #### Scenario: Update handoff to sidecar
 - **WHEN** a worker emits a curated update
 - **THEN** the serialized update is enqueued to the sidecar channel without awaiting broker I/O
-
-### Requirement: Bridge Channel Selection
-The system SHALL select the bridge channel implementation using a benchmark-driven bakeoff against Arancini workload characteristics.
-
-#### Scenario: Channel implementation decision
-- **WHEN** bridge candidates (`kanal`, `crossfire`) are evaluated under representative payload and backpressure conditions
-- **THEN** one default channel implementation is selected and documented with throughput and tail-latency results
 
 ### Requirement: JetStream Async Publish
 The system SHALL publish updates to NATS JetStream using async publish operations and process server ACKs outside the worker hot path.

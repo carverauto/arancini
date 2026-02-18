@@ -5,17 +5,146 @@ use monoio::io::AsyncReadRent;
 use monoio::net::{ListenerOpts, TcpListener, TcpStream};
 use monoio::{FusionDriver, RuntimeBuilder};
 use risotto_lib::process_bmp_message;
+use risotto_lib::sender::UpdateSender;
 use risotto_lib::state_store::memory::MemoryStore;
-use risotto_lib::update::Update;
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::config::{AppConfig, BMPConfig};
 
 const BMP_COMMON_HEADER_LEN: usize = 6;
 const BMP_MAX_MESSAGE_TYPE: u8 = 6;
+
+#[derive(Debug, Clone, Copy)]
+struct SessionOwnerEntry {
+    worker_id: usize,
+    ref_count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SessionOwnerRegistry {
+    owners: Arc<std::sync::Mutex<HashMap<IpAddr, SessionOwnerEntry>>>,
+}
+
+#[derive(Debug)]
+struct SessionOwnerGuard {
+    registry: SessionOwnerRegistry,
+    router_ip: IpAddr,
+    worker_id: usize,
+}
+
+impl SessionOwnerRegistry {
+    fn claim(&self, router_ip: IpAddr, worker_id: usize) -> Result<SessionOwnerGuard> {
+        let mut owners = self
+            .owners
+            .lock()
+            .map_err(|_| anyhow::anyhow!("session owner registry lock poisoned"))?;
+        match owners.entry(router_ip) {
+            Entry::Vacant(slot) => {
+                slot.insert(SessionOwnerEntry {
+                    worker_id,
+                    ref_count: 1,
+                });
+            }
+            Entry::Occupied(mut slot) => {
+                let owner = slot.get_mut();
+                if owner.worker_id != worker_id {
+                    counter!("risotto_arancini_session_ownership_conflicts_total").increment(1);
+                    anyhow::bail!(
+                        "router {} already owned by worker {}, worker {} cannot claim",
+                        router_ip,
+                        owner.worker_id,
+                        worker_id
+                    );
+                }
+                owner.ref_count += 1;
+                counter!("risotto_arancini_session_duplicate_claims_total").increment(1);
+            }
+        }
+
+        counter!("risotto_arancini_session_claim_total").increment(1);
+        Ok(SessionOwnerGuard {
+            registry: self.clone(),
+            router_ip,
+            worker_id,
+        })
+    }
+
+    fn assert_owner(&self, router_ip: IpAddr, worker_id: usize) -> Result<()> {
+        let owners = self
+            .owners
+            .lock()
+            .map_err(|_| anyhow::anyhow!("session owner registry lock poisoned"))?;
+        match owners.get(&router_ip) {
+            Some(owner) if owner.worker_id == worker_id => Ok(()),
+            Some(owner) => {
+                counter!("risotto_arancini_session_ownership_assert_failures_total").increment(1);
+                anyhow::bail!(
+                    "router {} ownership mismatch: expected worker {}, found worker {}",
+                    router_ip,
+                    worker_id,
+                    owner.worker_id
+                )
+            }
+            None => {
+                counter!("risotto_arancini_session_ownership_assert_failures_total").increment(1);
+                anyhow::bail!(
+                    "router {} has no active owner while asserting worker {}",
+                    router_ip,
+                    worker_id
+                )
+            }
+        }
+    }
+
+    fn release(&self, router_ip: IpAddr, worker_id: usize) {
+        let mut owners = match self.owners.lock() {
+            Ok(owners) => owners,
+            Err(_) => {
+                error!("session owner registry lock poisoned during release");
+                return;
+            }
+        };
+
+        let mut remove_entry = false;
+        if let Some(owner) = owners.get_mut(&router_ip) {
+            if owner.worker_id != worker_id {
+                counter!("risotto_arancini_session_ownership_assert_failures_total").increment(1);
+                warn!(
+                    "router {} release by worker {} rejected; owned by worker {}",
+                    router_ip, worker_id, owner.worker_id
+                );
+                return;
+            }
+
+            if owner.ref_count > 1 {
+                owner.ref_count -= 1;
+            } else {
+                remove_entry = true;
+            }
+            counter!("risotto_arancini_session_release_total").increment(1);
+        }
+
+        if remove_entry {
+            owners.remove(&router_ip);
+        }
+    }
+}
+
+impl SessionOwnerGuard {
+    fn assert_owner(&self) -> Result<()> {
+        self.registry.assert_owner(self.router_ip, self.worker_id)
+    }
+}
+
+impl Drop for SessionOwnerGuard {
+    fn drop(&mut self) {
+        self.registry.release(self.router_ip, self.worker_id);
+    }
+}
 
 #[derive(Debug, Default)]
 struct IngestAllocationStats {
@@ -153,12 +282,13 @@ fn next_packet_length(
     Ok(Some(packet_length))
 }
 
-pub fn spawn_workers(cfg: Arc<AppConfig>, tx: Sender<Update>) -> Result<()> {
+pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> {
     let workers = cfg.runtime.arancini_workers;
     if workers == 0 {
         anyhow::bail!("arancini runtime requires at least one worker thread");
     }
     let bmp_config = cfg.bmp.clone();
+    let ownership = SessionOwnerRegistry::default();
 
     let core_ids = core_affinity::get_core_ids();
     info!(
@@ -169,6 +299,7 @@ pub fn spawn_workers(cfg: Arc<AppConfig>, tx: Sender<Update>) -> Result<()> {
     for worker_id in 0..workers {
         let tx = tx.clone();
         let bmp_config = bmp_config.clone();
+        let ownership = ownership.clone();
         let pinned_core = core_ids
             .as_ref()
             .and_then(|ids| ids.get(worker_id % ids.len()).cloned());
@@ -189,7 +320,7 @@ pub fn spawn_workers(cfg: Arc<AppConfig>, tx: Sender<Update>) -> Result<()> {
                 };
 
                 runtime.block_on(async move {
-                    if let Err(err) = worker_loop(worker_id, bmp_config, tx).await {
+                    if let Err(err) = worker_loop(worker_id, bmp_config, tx, ownership).await {
                         error!("arancini worker {} failed: {}", worker_id, err);
                     }
                 });
@@ -199,7 +330,12 @@ pub fn spawn_workers(cfg: Arc<AppConfig>, tx: Sender<Update>) -> Result<()> {
     Ok(())
 }
 
-async fn worker_loop(worker_id: usize, cfg: BMPConfig, tx: Sender<Update>) -> Result<()> {
+async fn worker_loop<S: UpdateSender>(
+    worker_id: usize,
+    cfg: BMPConfig,
+    tx: S,
+    ownership: SessionOwnerRegistry,
+) -> Result<()> {
     // SO_REUSEPORT is enabled to let the kernel spread accepted sessions across workers.
     let mut opts = ListenerOpts::new()
         .reuse_port(true)
@@ -213,7 +349,20 @@ async fn worker_loop(worker_id: usize, cfg: BMPConfig, tx: Sender<Update>) -> Re
 
     loop {
         let (stream, socket) = listener.accept().await?;
-        debug!("arancini worker {} accepted {}", worker_id, socket);
+        let owner_guard = match ownership.claim(socket.ip(), worker_id) {
+            Ok(owner_guard) => owner_guard,
+            Err(err) => {
+                warn!(
+                    "arancini worker {} rejected {} due to ownership conflict: {}",
+                    worker_id, socket, err
+                );
+                continue;
+            }
+        };
+        debug!(
+            "arancini worker {} accepted {} (router owner claim active)",
+            worker_id, socket
+        );
 
         if let Err(err) = stream.set_nodelay(true) {
             warn!(
@@ -225,19 +374,24 @@ async fn worker_loop(worker_id: usize, cfg: BMPConfig, tx: Sender<Update>) -> Re
         let tx = tx.clone();
         let conn_cfg = cfg.clone();
         monoio::spawn(async move {
-            if let Err(err) = handle_connection(stream, socket, conn_cfg, tx).await {
+            if let Err(err) =
+                handle_connection(stream, socket, conn_cfg, tx, worker_id, owner_guard).await
+            {
                 error!("arancini connection {} failed: {}", socket, err);
             }
         });
     }
 }
 
-async fn handle_connection(
+async fn handle_connection<S: UpdateSender>(
     mut stream: TcpStream,
     socket: SocketAddr,
     cfg: BMPConfig,
-    tx: Sender<Update>,
+    tx: S,
+    worker_id: usize,
+    owner_guard: SessionOwnerGuard,
 ) -> Result<()> {
+    owner_guard.assert_owner()?;
     let mut alloc_stats = IngestAllocationStats::default();
     let mut slots = FixedSlotRing::new(
         cfg.arancini_fixed_slot_count,
@@ -292,7 +446,7 @@ async fn handle_connection(
 
             trace!("{}: arancini read BMP packet ({} bytes)", socket, packet_length);
             let mut bytes = frame_buffer.split_to(packet_length).freeze();
-            process_bmp_message::<MemoryStore>(None, tx.clone(), socket, &mut bytes).await?;
+            process_bmp_message::<MemoryStore, S>(None, tx.clone(), socket, &mut bytes).await?;
         }
 
         if frame_buffer.len() > cfg.arancini_max_frame_size_bytes {
@@ -308,6 +462,10 @@ async fn handle_connection(
     debug!(
         "{}: arancini ingest allocation stats: slot_growth_events={}, frame_buffer_growth_events={}",
         socket, alloc_stats.slot_growth_events, alloc_stats.frame_buffer_growth_events
+    );
+    debug!(
+        "{}: arancini session ownership released for worker {}",
+        socket, worker_id
     );
 
     Ok(())
@@ -374,6 +532,39 @@ mod tests {
         assert_eq!(
             next_packet_length(&buffer, socket, 128).unwrap(),
             Some(packet.len())
+        );
+    }
+
+    #[test]
+    fn session_owner_registry_rejects_cross_worker_claims() {
+        let registry = SessionOwnerRegistry::default();
+        let router_ip: IpAddr = "192.0.2.10".parse().unwrap();
+
+        let first = registry.claim(router_ip, 1).unwrap();
+        assert!(registry.claim(router_ip, 2).is_err());
+        drop(first);
+        assert!(registry.claim(router_ip, 2).is_ok());
+    }
+
+    #[test]
+    fn session_owner_registry_refcounts_same_worker_claims() {
+        let registry = SessionOwnerRegistry::default();
+        let router_ip: IpAddr = "198.51.100.77".parse().unwrap();
+
+        let first = registry.claim(router_ip, 3).unwrap();
+        let second = registry.claim(router_ip, 3).unwrap();
+        assert!(registry.assert_owner(router_ip, 3).is_ok());
+
+        drop(first);
+        assert!(
+            registry.assert_owner(router_ip, 3).is_ok(),
+            "ownership should stay active while one claim remains"
+        );
+
+        drop(second);
+        assert!(
+            registry.assert_owner(router_ip, 3).is_err(),
+            "ownership should be removed after final claim drops"
         );
     }
 }

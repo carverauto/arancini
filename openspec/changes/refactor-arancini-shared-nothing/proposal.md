@@ -8,7 +8,7 @@ Recent hot-path analysis also identified immediate throughput collapse risks in 
 ## What Changes
 - **BREAKING** Replace BMP ingest runtime from Tokio task scheduling to `monoio` thread-per-core workers backed by `io_uring`.
 - **BREAKING** Replace Kafka producer integration with NATS JetStream publishing.
-- Add a lock-free bridge from monoio worker threads to a dedicated Tokio-based NATS sidecar thread using a bounded lock-free MPSC channel (benchmark-selected between `kanal` and `crossfire`).
+- Add a lock-free bridge from monoio worker threads to a dedicated Tokio-based NATS sidecar thread using a bounded lock-free `crossfire` MPSC channel.
 - Implement `io_uring`-backed fixed-slot BMP ingress with parse handoff and no per-message allocation churn.
 - Enforce session ownership by core so each router session's RIB mutations are local to one worker.
 - Replace global curation lock model with sharded per-core RIB state and local dedup/synthetic-withdraw logic.

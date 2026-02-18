@@ -1,4 +1,5 @@
 pub mod processor;
+pub mod sender;
 pub mod state;
 pub mod state_store;
 pub mod update;
@@ -8,21 +9,21 @@ use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
 use bytes::Bytes;
 use metrics::counter;
 use std::net::SocketAddr;
-use tokio::sync::mpsc::Sender;
 use tracing::{debug, trace};
 
 use crate::processor::{
     decode_bmp_message, peer_down_notification, peer_up_notification, route_monitoring,
 };
+use crate::sender::UpdateSender;
 use crate::state::AsyncState;
 use crate::state_store::store::StateStore;
-use crate::update::{new_metadata, Update};
+use crate::update::new_metadata;
 
 /// Process a BMP message from raw bytes
 /// This is a convenience wrapper for BMP collectors
-pub async fn process_bmp_message<T: StateStore>(
+pub async fn process_bmp_message<T: StateStore, S: UpdateSender>(
     state: Option<AsyncState<T>>,
-    tx: Sender<Update>,
+    tx: S,
     socket: SocketAddr,
     bytes: &mut Bytes,
 ) -> Result<()> {

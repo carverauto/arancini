@@ -1,5 +1,6 @@
 mod arancini;
 mod bmp;
+mod bridge;
 mod config;
 mod producer;
 mod serializer;
@@ -7,6 +8,7 @@ mod state;
 mod update_capnp;
 
 use anyhow::Result;
+use futures::future::pending;
 use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,6 +22,7 @@ use risotto_lib::state_store::memory::MemoryStore;
 use risotto_lib::state_store::store::StateStore;
 use risotto_lib::update::Update;
 
+use crate::bridge::BridgeSender;
 use crate::config::{configure, AppConfig, BMPConfig, RuntimeMode};
 
 fn build_tokio_bmp_listener(cfg: &BMPConfig) -> Result<TcpListener> {
@@ -95,7 +98,7 @@ async fn bmp_handler<T: StateStore>(
     }
 }
 
-async fn arancini_handler(cfg: Arc<AppConfig>, tx: Sender<Update>) {
+async fn arancini_handler(cfg: Arc<AppConfig>, tx: BridgeSender) {
     if cfg.curation.enabled {
         error!("arancini runtime currently requires curation to be disabled (--curation-disable)");
         return;
@@ -103,7 +106,10 @@ async fn arancini_handler(cfg: Arc<AppConfig>, tx: Sender<Update>) {
 
     if let Err(err) = arancini::spawn_workers(cfg, tx) {
         error!("failed to spawn arancini workers: {}", err);
+        return;
     }
+
+    pending::<()>().await;
 }
 
 async fn producer_handler(cfg: Arc<AppConfig>, rx: Receiver<Update>) {
@@ -144,14 +150,22 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Initialize MPSC channel to communicate between BMP tasks and producer task
-    let (tx, rx) = channel(cfg.kafka.mpsc_buffer_size);
+    // Producer ingress channel
+    let (producer_tx, rx) = channel(cfg.kafka.mpsc_buffer_size);
 
     // Initialize tasks
     let ingress_task = if cfg.runtime.mode == RuntimeMode::Arancini {
-        shutdown.spawn_task(arancini_handler(cfg.clone(), tx.clone()))
+        let (bridge_tx, bridge_rx) = bridge::bounded_channel(cfg.runtime.arancini_bridge_buffer_size);
+        if let Some(capacity) = bridge_tx.queue_capacity() {
+            debug!("arancini bridge queue capacity set to {}", capacity);
+        }
+        if let Err(err) = bridge::spawn_sidecar_thread(bridge_rx, producer_tx.clone()) {
+            anyhow::bail!("failed to start arancini sidecar thread: {}", err);
+        }
+
+        shutdown.spawn_task(arancini_handler(cfg.clone(), bridge_tx))
     } else {
-        shutdown.spawn_task(bmp_handler(state.clone(), cfg.clone(), tx.clone()))
+        shutdown.spawn_task(bmp_handler(state.clone(), cfg.clone(), producer_tx.clone()))
     };
     let producer_task = shutdown.spawn_task(producer_handler(cfg.clone(), rx));
     tokio::select! {

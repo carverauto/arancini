@@ -24,9 +24,9 @@ Hot-path profiling and code review found several pre-existing failure modes in t
    - Session is handled entirely by owning worker.
 
 2. **Zero-Copy Ingress**
-   - Worker uses fixed buffer rings (`FixedSizeSlot`) registered with `io_uring`.
-   - BMP packet bytes are DMA-written into registered buffers.
+   - Worker uses fixed-size reusable slot rings on the `io_uring`-backed runtime path.
    - Parser reads directly from those buffers before recycle.
+   - Kernel-registered buffer-select (`ProvideBuffers`/`BUFFER_SELECT`) is tracked as an advanced follow-up once runtime support is available.
 
 3. **Local Curation State (Sharded RIB)**
    - Each worker maintains its own RIB shard.
@@ -34,9 +34,10 @@ Hot-path profiling and code review found several pre-existing failure modes in t
    - No global mutex around all router/peer state.
 
 4. **NATS Bridge and Sidecar**
-   - Worker serializes update and pushes bytes into bounded lock-free `kanal` channel.
+   - Worker serializes update and pushes bytes into bounded lock-free MPSC channel.
    - Dedicated Tokio sidecar owns NATS JetStream client and publish pipeline.
    - Sidecar handles server ACK futures asynchronously to keep worker hot path non-blocking.
+   - Bridge channel crate is selected by bakeoff (`kanal` vs `crossfire`) under Arancini load.
 
 ## Baseline Hot-Path Remediation (Phase 0)
 Before or in parallel with full Arancini cutover, the implementation must remove current-path bottlenecks:

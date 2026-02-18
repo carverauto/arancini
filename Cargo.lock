@@ -15,6 +15,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
+ "getrandom 0.3.3",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -2106,6 +2107,7 @@ dependencies = [
  "rdkafka",
  "risotto-lib",
  "serde",
+ "socket2 0.5.10",
  "tokio",
  "tokio-graceful",
  "tracing",
@@ -2116,6 +2118,7 @@ dependencies = [
 name = "risotto-lib"
 version = "0.6.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "bgpkit-parser",
  "bytes",

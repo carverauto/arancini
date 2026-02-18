@@ -1,3 +1,4 @@
+use ahash::RandomState;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
@@ -8,13 +9,13 @@ use crate::update::Update;
 
 #[derive(Serialize, Deserialize)]
 pub struct MemoryStore {
-    routers: HashMap<IpAddr, Router>,
+    routers: HashMap<IpAddr, Router, RandomState>,
 }
 
 impl MemoryStore {
     pub fn new() -> MemoryStore {
         MemoryStore {
-            routers: HashMap::new(),
+            routers: HashMap::with_hasher(RandomState::default()),
         }
     }
 
@@ -65,25 +66,25 @@ impl StateStore for MemoryStore {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Peer {
     pub peer_addr: IpAddr,
-    pub updates: HashSet<TimedPrefix>,
+    pub updates: HashSet<TimedPrefix, RandomState>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Router {
-    peers: HashMap<IpAddr, Peer>,
+    peers: HashMap<IpAddr, Peer, RandomState>,
 }
 
 impl Router {
     fn new() -> Router {
         Router {
-            peers: HashMap::new(),
+            peers: HashMap::with_hasher(RandomState::default()),
         }
     }
 
     fn add_peer(&mut self, peer_addr: &IpAddr) {
         self.peers.entry(*peer_addr).or_insert_with(|| Peer {
             peer_addr: peer_addr.clone(),
-            updates: HashSet::new(),
+            updates: HashSet::with_hasher(RandomState::default()),
         });
     }
 

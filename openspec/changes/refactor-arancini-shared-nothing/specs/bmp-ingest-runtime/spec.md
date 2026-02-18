@@ -9,12 +9,17 @@ The system SHALL run BMP ingestion on a monoio thread-per-core runtime rather th
 - **AND** each worker owns its local ingest loop and session handling
 
 ### Requirement: io_uring Fixed-Buffer Ingestion
-The system SHALL use `io_uring` fixed registered buffers for BMP packet reads to minimize copy and syscall overhead.
+The system SHALL use `io_uring`-backed fixed-size reusable slots for BMP packet reads to minimize copy and allocation overhead.
 
 #### Scenario: BMP packet read path
 - **WHEN** a worker reads BMP packet data
-- **THEN** bytes are read into pre-registered fixed slots
+- **THEN** bytes are read into reusable fixed slots
 - **AND** parsing consumes those bytes before the slot is recycled
+
+#### Scenario: Partial frame handling under load
+- **WHEN** a BMP frame arrives in multiple TCP segments
+- **THEN** the worker read loop buffers partial data without busy-spin behavior
+- **AND** the frame is parsed once complete without allocating a fresh packet buffer per message
 
 ### Requirement: Deterministic Session Ownership
 The system SHALL enforce deterministic ownership of each BMP session by a single worker core for the lifetime of that session.

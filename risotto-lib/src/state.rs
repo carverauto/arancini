@@ -12,7 +12,7 @@ use tokio::time::sleep;
 use tracing::{debug, trace};
 
 use crate::state_store::store::StateStore;
-use crate::update::{map_to_ipv6, Update, UpdateMetadata};
+use crate::update::{map_to_ipv6, Update, UpdateAttributes, UpdateMetadata};
 
 pub type AsyncState<T> = Arc<Mutex<State<T>>>;
 pub type RouterPeerUpdate = (IpAddr, IpAddr, TimedPrefix);
@@ -101,7 +101,7 @@ impl Hash for TimedPrefix {
     }
 }
 
-pub fn synthesize_withdraw_update(prefix: TimedPrefix, metadata: UpdateMetadata) -> Update {
+pub fn synthesize_withdraw_update(prefix: &TimedPrefix, metadata: UpdateMetadata) -> Update {
     Update {
         time_received_ns: Utc::now(),
         time_bmp_header_ns: Utc::now(),
@@ -116,26 +116,7 @@ pub fn synthesize_withdraw_update(prefix: TimedPrefix, metadata: UpdateMetadata)
         is_adj_rib_out: prefix.is_adj_rib_out,
         announced: false,
         synthetic: true,
-
-        // BGP Attributes - all empty/default for synthetic withdraws
-        origin: "INCOMPLETE".to_string(),
-        as_path: vec![],
-        next_hop: None,
-        multi_exit_discriminator: None,
-        local_preference: None,
-        only_to_customer: None,
-        atomic_aggregate: false,
-        aggregator_asn: None,
-        aggregator_bgp_id: None,
-        communities: vec![],
-        extended_communities: vec![],
-        large_communities: vec![],
-        originator_id: None,
-        cluster_list: vec![],
-        mp_reach_afi: None,
-        mp_reach_safi: None,
-        mp_unreach_afi: None,
-        mp_unreach_safi: None,
+        attrs: Arc::new(UpdateAttributes::synthetic_withdraw()),
     }
 }
 
@@ -160,12 +141,10 @@ pub async fn peer_up_withdraws_handler<T: StateStore>(
 
     drop(state_lock);
 
-    let mut synthetic_updates = Vec::new();
+    let mut stale_prefixes = Vec::new();
     for timed_prefix in timed_prefixes {
         if timed_prefix.timestamp < startup.timestamp_millis() {
-            // This update has not been re-announced after startup
-            // Emit a synthetic withdraw update
-            synthetic_updates.push(synthesize_withdraw_update(timed_prefix, metadata.clone()));
+            stale_prefixes.push(timed_prefix);
         }
     }
 
@@ -173,27 +152,24 @@ pub async fn peer_up_withdraws_handler<T: StateStore>(
         "[{} - {} - emitting {} synthetic withdraw updates",
         metadata.router_socket,
         metadata.peer_addr,
-        synthetic_updates.len()
+        stale_prefixes.len()
     );
 
-    counter!(
-        "risotto_tx_updates_total",
-        "router" => metadata.router_socket.ip().to_string(),
-        "peer" => metadata.peer_addr.to_string(),
-    )
-    .increment(synthetic_updates.len() as u64);
+    counter!("risotto_tx_updates_total").increment(stale_prefixes.len() as u64);
 
-    for update in &synthetic_updates {
+    for prefix in &stale_prefixes {
+        let update = synthesize_withdraw_update(prefix, metadata.clone());
         trace!("{:?}", update);
-        tx.send(update.clone()).await?;
+        tx.send(update).await?;
     }
 
     // Remove updates from state after sends complete; do not await while holding the lock.
     let mut state_lock = state.lock().await;
-    for update in &synthetic_updates {
+    for prefix in &stale_prefixes {
+        let update = synthesize_withdraw_update(prefix, metadata.clone());
         state_lock
             .store
-            .update(&update.router_addr, &metadata.peer_addr, update);
+            .update(&update.router_addr, &metadata.peer_addr, &update);
     }
 
     Ok(())
@@ -229,16 +205,9 @@ pub async fn process_updates<T: StateStore>(
             // Emit after lock release so slow channel sends cannot stall state updates.
             for update in to_emit {
                 trace!("Emitting update: {:?}", update);
-                let router = update.router_addr.to_string();
-                let peer = update.peer_addr.to_string();
                 tx.send(update).await?;
 
-                counter!(
-                    "risotto_tx_updates_total",
-                    "router" => router,
-                    "peer" => peer,
-                )
-                .increment(1);
+                counter!("risotto_tx_updates_total").increment(1);
             }
         }
         None => {
@@ -246,12 +215,7 @@ pub async fn process_updates<T: StateStore>(
             for update in updates {
                 trace!("Forwarding update: {:?}", update);
 
-                counter!(
-                    "risotto_tx_updates_total",
-                    "router" => update.router_addr.to_string(),
-                    "peer" => update.peer_addr.to_string(),
-                )
-                .increment(1);
+                counter!("risotto_tx_updates_total").increment(1);
 
                 tx.send(update).await?;
             }

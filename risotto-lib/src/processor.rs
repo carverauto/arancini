@@ -68,12 +68,7 @@ pub async fn route_monitoring<T: StateStore>(
     // Decode BMP RouteMonitoring message into Update structs
     let updates = decode_updates(body, metadata.clone()).unwrap_or_default();
 
-    counter!(
-        "risotto_rx_updates_total",
-        "router" => metadata.router_socket.ip().to_string(),
-        "peer" => metadata.peer_addr.to_string(),
-    )
-    .increment(updates.len() as u64);
+    counter!("risotto_rx_updates_total").increment(updates.len() as u64);
 
     // Process updates through state machine
     process_updates(state, tx, updates).await?;
@@ -96,7 +91,7 @@ pub async fn peer_down_notification<T: StateStore>(
                 .get_updates_by_peer(&metadata.router_socket.ip(), &metadata.peer_addr)
                 .unwrap();
             for prefix in updates {
-                synthetic_updates.push(synthesize_withdraw_update(prefix, metadata.clone()));
+                synthetic_updates.push(synthesize_withdraw_update(&prefix, metadata.clone()));
             }
 
             state_lock
@@ -111,12 +106,7 @@ pub async fn peer_down_notification<T: StateStore>(
         )
         .set(0);
 
-        counter!(
-            "risotto_tx_updates_total",
-            "router" => metadata.router_socket.ip().to_string(),
-            "peer" => metadata.peer_addr.to_string(),
-        )
-        .increment(synthetic_updates.len() as u64);
+        counter!("risotto_tx_updates_total").increment(synthetic_updates.len() as u64);
 
         for update in synthetic_updates {
             trace!("{:?}", update);

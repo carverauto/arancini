@@ -29,6 +29,11 @@ pub struct RuntimeConfig {
 #[derive(Debug, Clone)]
 pub struct BMPConfig {
     pub host: SocketAddr,
+    pub listener_backlog: i32,
+    pub socket_recv_buffer_bytes: Option<usize>,
+    pub arancini_fixed_slot_size_bytes: usize,
+    pub arancini_fixed_slot_count: usize,
+    pub arancini_max_frame_size_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +73,26 @@ pub struct Cli {
     /// BMP listener address (IP or FQDN)
     #[arg(long, default_value = "0.0.0.0:4000")]
     pub bmp_address: String,
+
+    /// TCP listen backlog for BMP ingress listener sockets
+    #[arg(long, default_value_t = 1024)]
+    pub bmp_listener_backlog: i32,
+
+    /// Requested SO_RCVBUF size in bytes for BMP ingress sockets
+    #[arg(long)]
+    pub bmp_socket_recv_buffer_bytes: Option<usize>,
+
+    /// Arancini fixed slot size in bytes for BMP ingress buffers
+    #[arg(long, default_value_t = 64 * 1024)]
+    pub arancini_fixed_slot_size_bytes: usize,
+
+    /// Arancini fixed slot count per worker for BMP ingress buffers
+    #[arg(long, default_value_t = 8)]
+    pub arancini_fixed_slot_count: usize,
+
+    /// Maximum accepted BMP frame size in bytes in Arancini mode
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    pub arancini_max_frame_size_bytes: usize,
 
     /// Kafka brokers (comma-separated list of address:port)
     #[arg(long, value_delimiter(','), default_value = "localhost:9092")]
@@ -186,6 +211,14 @@ fn set_metrics(metrics_address: SocketAddr) {
         "risotto_tx_updates_total",
         "Total number of updates transmitted"
     );
+    metrics::describe_counter!(
+        "risotto_arancini_ingest_slot_growth_total",
+        "Number of Arancini ingest slot ring capacity growth events"
+    );
+    metrics::describe_counter!(
+        "risotto_arancini_ingest_frame_buffer_growth_total",
+        "Number of Arancini ingest frame-buffer capacity growth events"
+    );
 }
 
 pub async fn resolve_address(address: String) -> Result<SocketAddr> {
@@ -228,7 +261,14 @@ pub async fn configure() -> Result<AppConfig> {
             mode: cli.runtime_mode,
             arancini_workers: cli.arancini_workers,
         },
-        bmp: BMPConfig { host: bmp_addr },
+        bmp: BMPConfig {
+            host: bmp_addr,
+            listener_backlog: cli.bmp_listener_backlog,
+            socket_recv_buffer_bytes: cli.bmp_socket_recv_buffer_bytes,
+            arancini_fixed_slot_size_bytes: cli.arancini_fixed_slot_size_bytes,
+            arancini_fixed_slot_count: cli.arancini_fixed_slot_count,
+            arancini_max_frame_size_bytes: cli.arancini_max_frame_size_bytes,
+        },
         kafka: KafkaConfig {
             disable: cli.kafka_disable,
             brokers: resolved_kafka_brokers,

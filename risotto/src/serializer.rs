@@ -14,6 +14,7 @@ pub fn serialize_ip_addr(ip: IpAddr) -> Vec<u8> {
 }
 
 pub fn serialize_update(update: &Update) -> Vec<u8> {
+    let attrs = update.attrs.as_ref();
     let mut message = Builder::new_default();
     {
         let mut u = message.init_root::<update::Builder>();
@@ -32,34 +33,34 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         u.set_synthetic(update.synthetic);
 
         // BGP Attributes - structured fields
-        u.set_origin(&update.origin);
+        u.set_origin(&attrs.origin);
 
         // AS Path
-        let mut as_path = u.reborrow().init_as_path(update.as_path.len() as u32);
-        for (i, &asn) in update.as_path.iter().enumerate() {
+        let mut as_path = u.reborrow().init_as_path(attrs.as_path.len() as u32);
+        for (i, &asn) in attrs.as_path.iter().enumerate() {
             as_path.set(i as u32, asn);
         }
 
         // Next Hop
-        let next_hop = update
+        let next_hop = attrs
             .next_hop
             .unwrap_or(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED));
         u.set_next_hop(&serialize_ip_addr(next_hop));
 
         // Multi Exit Discriminator
-        u.set_multi_exit_disc(update.multi_exit_discriminator.unwrap_or(0));
+        u.set_multi_exit_disc(attrs.multi_exit_discriminator.unwrap_or(0));
 
         // Local Preference
-        u.set_local_preference(update.local_preference.unwrap_or(0));
+        u.set_local_preference(attrs.local_preference.unwrap_or(0));
 
         // Only To Customer
-        u.set_only_to_customer(update.only_to_customer.unwrap_or(0));
+        u.set_only_to_customer(attrs.only_to_customer.unwrap_or(0));
 
         // Atomic Aggregate
-        u.set_atomic_aggregate(update.atomic_aggregate);
+        u.set_atomic_aggregate(attrs.atomic_aggregate);
 
         // Aggregator
-        if let (Some(asn), Some(bgp_id)) = (update.aggregator_asn, update.aggregator_bgp_id) {
+        if let (Some(asn), Some(bgp_id)) = (attrs.aggregator_asn, attrs.aggregator_bgp_id) {
             u.set_aggregator_asn(asn);
             u.set_aggregator_bgp_id(bgp_id);
         }
@@ -67,8 +68,8 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         // Communities
         let mut communities = u
             .reborrow()
-            .init_communities(update.communities.len() as u32);
-        for (i, &(asn, value)) in update.communities.iter().enumerate() {
+            .init_communities(attrs.communities.len() as u32);
+        for (i, &(asn, value)) in attrs.communities.iter().enumerate() {
             let mut community = communities.reborrow().get(i as u32);
             community.set_asn(asn);
             community.set_value(value);
@@ -77,8 +78,8 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         // Extended Communities
         let mut ext_communities = u
             .reborrow()
-            .init_extended_communities(update.extended_communities.len() as u32);
-        for (i, (type_high, type_low, value)) in update.extended_communities.iter().enumerate() {
+            .init_extended_communities(attrs.extended_communities.len() as u32);
+        for (i, (type_high, type_low, value)) in attrs.extended_communities.iter().enumerate() {
             let mut ext_community = ext_communities.reborrow().get(i as u32);
             ext_community.set_type_high(*type_high);
             ext_community.set_type_low(*type_low);
@@ -88,9 +89,9 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         // Large Communities
         let mut large_communities = u
             .reborrow()
-            .init_large_communities(update.large_communities.len() as u32);
+            .init_large_communities(attrs.large_communities.len() as u32);
         for (i, &(global_admin, local_data1, local_data2)) in
-            update.large_communities.iter().enumerate()
+            attrs.large_communities.iter().enumerate()
         {
             let mut large_community = large_communities.reborrow().get(i as u32);
             large_community.set_global_admin(global_admin);
@@ -99,31 +100,31 @@ pub fn serialize_update(update: &Update) -> Vec<u8> {
         }
 
         // Originator ID
-        if let Some(originator_id) = update.originator_id {
+        if let Some(originator_id) = attrs.originator_id {
             u.set_originator_id(originator_id);
         }
 
         // Cluster List
         let mut cluster_list = u
             .reborrow()
-            .init_cluster_list(update.cluster_list.len() as u32);
-        for (i, &cluster_id) in update.cluster_list.iter().enumerate() {
+            .init_cluster_list(attrs.cluster_list.len() as u32);
+        for (i, &cluster_id) in attrs.cluster_list.iter().enumerate() {
             cluster_list.set(i as u32, cluster_id);
         }
 
         // MP Reach NLRI
-        if let Some(afi) = update.mp_reach_afi {
+        if let Some(afi) = attrs.mp_reach_afi {
             u.set_mp_reach_afi(afi);
         }
-        if let Some(safi) = update.mp_reach_safi {
+        if let Some(safi) = attrs.mp_reach_safi {
             u.set_mp_reach_safi(safi);
         }
 
         // MP Unreach NLRI
-        if let Some(afi) = update.mp_unreach_afi {
+        if let Some(afi) = attrs.mp_unreach_afi {
             u.set_mp_unreach_afi(afi);
         }
-        if let Some(safi) = update.mp_unreach_safi {
+        if let Some(safi) = attrs.mp_unreach_safi {
             u.set_mp_unreach_safi(safi);
         }
     }

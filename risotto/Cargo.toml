@@ -28,6 +28,7 @@ num_cpus = "1.17.0"
 rdkafka = "0.39.0"
 risotto-lib = { path = "../risotto-lib", version = "0.6.0" }
 serde = { version = "1.0.217", features = ["derive"] }
+socket2 = "0.5.10"
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-graceful = "0.2.2"
 tracing = "0.1.41"

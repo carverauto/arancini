@@ -173,12 +173,7 @@ pub async fn handle(config: &KafkaConfig, mut rx: Receiver<Update>) -> Result<()
                     in_flight.push(delivery_future);
                     break;
                 }
-                Err((error, _))
-                    if matches!(
-                        error,
-                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
-                    ) =>
-                {
+                Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
                     if let Some(delivery_status) = in_flight.next().await {
                         record_delivery_status(delivery_status);
                     } else {

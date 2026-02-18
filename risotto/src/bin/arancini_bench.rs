@@ -146,7 +146,7 @@ fn run_serialization_alloc_bench(iterations: u32) -> Vec<BenchRun> {
     let start = Instant::now();
     let mut count = 0_u64;
     for update in &updates {
-        let payload = serializer::serialize_update(&update);
+        let payload = serializer::serialize_update(update);
         black_box(payload.len());
         count += 1;
     }
@@ -162,7 +162,7 @@ fn run_serialization_alloc_bench(iterations: u32) -> Vec<BenchRun> {
     let mut count = 0_u64;
     let mut output = Vec::with_capacity(1024);
     for update in &updates {
-        serializer::serialize_update_into(&update, &mut output);
+        serializer::serialize_update_into(update, &mut output);
         black_box(output.len());
         count += 1;
     }

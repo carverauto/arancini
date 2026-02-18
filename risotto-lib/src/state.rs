@@ -60,7 +60,7 @@ impl<T: StateStore> State<T> {
         peer_addr: &IpAddr,
         update: &Update,
     ) -> Result<bool> {
-        let emit = self.store.update(router_addr, &peer_addr, update);
+        let emit = self.store.update(router_addr, peer_addr, update);
         if emit {
             let delta = if update.announced { 1.0 } else { -1.0 };
             gauge!(

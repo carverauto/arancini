@@ -143,7 +143,7 @@ pub fn decode_updates(message: RouteMonitoring, metadata: UpdateMetadata) -> Opt
         communities: new_communities(&communities),
         extended_communities: extract_extended_communities(&communities),
         large_communities: extract_large_communities(&communities),
-        originator_id: attributes.origin_id().map(|id| u32::from(id)),
+        originator_id: attributes.origin_id().map(u32::from),
         cluster_list: attributes.clusters().map_or_else(Vec::new, |c| c.to_vec()),
         mp_reach_afi: attributes.get_reachable_nlri().map(|nlri| match nlri.afi {
             bgpkit_parser::models::Afi::Ipv4 => 1u16,
@@ -207,9 +207,7 @@ pub fn decode_updates(message: RouteMonitoring, metadata: UpdateMetadata) -> Opt
 
 pub fn new_metadata(socket: SocketAddr, message: &BmpMessage) -> Option<UpdateMetadata> {
     // Get peer information
-    let Some(pph) = message.per_peer_header else {
-        return None;
-    };
+    let pph = message.per_peer_header?;
     let peer = Peer::new(pph.peer_bgp_id, pph.peer_ip, pph.peer_asn);
 
     // Get header information

@@ -86,3 +86,23 @@ Latest run (`2026-02-18T21:47:19Z`) on `Linux 5.15.0-312.187.5.3.el9uek.x86_64`:
 | arancini | 4000 | 2.213 | 1807.50 | 4013 | 0 |
 
 Observed result for this saturating replay profile: `1.69x` higher `rx_update` throughput for Arancini.
+
+## NATS JetStream mTLS
+
+Arancini supports TLS and mutual TLS for the NATS JetStream sidecar path.
+
+Example:
+
+```bash
+./target/release/risotto \
+  --runtime-mode=arancini \
+  --nats-sidecar-enable \
+  --nats-server nats://nats.example.net:4222 \
+  --nats-tls-required \
+  --nats-tls-ca-cert-path /etc/risotto/nats/ca.pem \
+  --nats-tls-client-cert-path /etc/risotto/nats/client.pem \
+  --nats-tls-client-key-path /etc/risotto/nats/client-key.pem
+```
+
+Optional:
+- `--nats-tls-first` enables handshake-first mode when the NATS server is configured for it.

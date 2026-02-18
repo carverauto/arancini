@@ -127,7 +127,7 @@ fn afi_safi_subject_token(update: &Update) -> String {
         (update.attrs.mp_unreach_afi, update.attrs.mp_unreach_safi)
     };
 
-    let afi = afi.unwrap_or_else(|| match update.prefix_addr {
+    let afi = afi.unwrap_or(match update.prefix_addr {
         IpAddr::V4(_) => 1u16,
         IpAddr::V6(_) => 2u16,
     });
@@ -328,9 +328,11 @@ mod tests {
             IpAddr::V4(Ipv4Addr::new(203, 0, 113, 0)),
             true,
         );
-        let mut attrs = UpdateAttributes::default();
-        attrs.mp_reach_afi = Some(1);
-        attrs.mp_reach_safi = Some(1);
+        let attrs = UpdateAttributes {
+            mp_reach_afi: Some(1),
+            mp_reach_safi: Some(1),
+            ..Default::default()
+        };
         update.attrs = Arc::new(attrs);
 
         let subject = nats_subject_for_update("arancini.updates", &update);
@@ -344,9 +346,11 @@ mod tests {
             IpAddr::V4(Ipv4Addr::new(203, 0, 113, 0)),
             true,
         );
-        let mut attrs = UpdateAttributes::default();
-        attrs.mp_reach_afi = Some(1);
-        attrs.mp_reach_safi = Some(1);
+        let attrs = UpdateAttributes {
+            mp_reach_afi: Some(1),
+            mp_reach_safi: Some(1),
+            ..Default::default()
+        };
         update.attrs = Arc::new(attrs);
 
         let subject = nats_subject_for_update("arancini.updates", &update);
@@ -360,9 +364,11 @@ mod tests {
             IpAddr::V6(Ipv6Addr::LOCALHOST),
             false,
         );
-        let mut attrs = UpdateAttributes::default();
-        attrs.mp_unreach_afi = Some(2);
-        attrs.mp_unreach_safi = Some(128);
+        let attrs = UpdateAttributes {
+            mp_unreach_afi: Some(2),
+            mp_unreach_safi: Some(128),
+            ..Default::default()
+        };
         update.attrs = Arc::new(attrs);
 
         let subject = nats_subject_for_update("arancini.updates", &update);

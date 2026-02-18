@@ -4,16 +4,16 @@
 
 # Risotto
 
-Risotto 😋 is a high-performance collector that processes BMP messages from routers and publishes updates to Kafka/Redpanda. This repository includes both the Risotto collector application and the Risotto library.
+Risotto 😋 is a high-performance collector that processes BMP messages from routers with the Arancini shared-nothing runtime. This repository includes both the Risotto collector application and the Risotto library.
 
-The collector application streams BGP updates to a Kafka topic, enabling downstream components to consume them. The library offers essential components for decoding BMP messages and generating BGP updates.
+The collector can forward updates to Kafka/Redpanda or NATS JetStream, while the library provides core BMP decoding and BGP update processing primitives.
 
 ## Quick Start
 
 The easiest way to use Risotto with Docker. This command will output the help message and exit:
 
 ```bash
-docker run ghcr.io/nxthdr/risotto:main --help
+docker run ghcr.io/carverauto/arancini:v0.7.0 --help
 ```
 
 To run Risotto with Docker with the default parameters, you can use the following command:
@@ -22,7 +22,7 @@ To run Risotto with Docker with the default parameters, you can use the followin
 docker run \
   -p 4000:4000 \
   -p 8080:8080 \
-  ghcr.io/nxthdr/risotto:main
+  ghcr.io/carverauto/arancini:v0.7.0
 ```
 
 By default, Risotto listens on port `4000` for BMP messages.
@@ -63,7 +63,7 @@ This validates:
 - Runtime socket option enforcement in code (`SO_REUSEPORT`, `TCP_NODELAY`, backlog and `SO_RCVBUF` wiring).
 - Linux host tuning guidance (`sysctl`, file descriptor limits, and RSS/IRQ readiness checks).
 
-## Runtime Benchmark (Risotto vs Arancini)
+## Runtime Benchmark (Arancini)
 
 Use this script to benchmark Arancini runtime throughput with producer paths disabled:
 
@@ -78,14 +78,7 @@ The script writes the report to:
 integration/bench/risotto-vs-arancini-bird-saturating-report.md
 ```
 
-Latest run (`2026-02-18T21:47:19Z`) on `Linux 5.15.0-312.187.5.3.el9uek.x86_64`:
-
-| Runtime | rx_update delta | elapsed sec | rx throughput (/s) | bmp_message delta | error count |
-|---|---:|---:|---:|---:|---:|
-| risotto | 4000 | 3.731 | 1072.10 | 4013 | 0 |
-| arancini | 4000 | 2.213 | 1807.50 | 4013 | 0 |
-
-Observed result for this saturating replay profile: `1.69x` higher `rx_update` throughput for Arancini.
+Use the report to capture current throughput and latency numbers for your target profile and host.
 
 ## NATS JetStream mTLS
 

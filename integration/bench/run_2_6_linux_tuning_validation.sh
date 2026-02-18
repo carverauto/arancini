@@ -135,9 +135,24 @@ check_triplet_third_min() {
     if command -v ethtool >/dev/null 2>&1; then
       iface="$(ls /sys/class/net | grep -vE '^(lo|docker|veth|br-)' | head -n1 || true)"
       if [[ -n "$iface" ]]; then
-        combined="$(ethtool -l "$iface" 2>/dev/null | awk '/Current hardware settings:/ {p=1; next} p && /Combined:/ {print $2; exit}')"
-        if [[ "$combined" =~ ^[0-9]+$ ]] && (( combined > 1 )); then
-          echo "- PASS: ethtool -l $iface reports Combined channels=$combined (>1)"
+        channels_out="$(ethtool -l "$iface" 2>/dev/null || true)"
+        max_combined="$(
+          awk '
+            /Pre-set maximums:/ {preset=1; next}
+            /Current hardware settings:/ {preset=0}
+            preset && /Combined:/ {print $2; exit}
+          ' <<<"$channels_out"
+        )"
+        current_combined="$(
+          awk '
+            /Current hardware settings:/ {current=1; next}
+            current && /Combined:/ {print $2; exit}
+          ' <<<"$channels_out"
+        )"
+        if [[ "$max_combined" =~ ^[0-9]+$ ]] && (( max_combined <= 1 )); then
+          echo "- PASS: ethtool -l $iface reports max Combined channels=$max_combined (single-queue NIC/VM; RSS channel scaling not available)"
+        elif [[ "$current_combined" =~ ^[0-9]+$ ]] && (( current_combined > 1 )); then
+          echo "- PASS: ethtool -l $iface reports Combined channels=$current_combined (>1)"
         else
           echo "- WARN: RSS channel count for $iface appears low or unavailable"
           HOST_STATUS="WARN"

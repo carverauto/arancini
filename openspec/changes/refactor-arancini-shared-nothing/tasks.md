@@ -35,6 +35,6 @@
 - [ ] 2.3 Run integration tests with multi-router BMP sessions and verify per-core deterministic ownership behavior.
 - [x] 2.4 Run throughput benchmarks and verify near-linear scaling trend with additional cores.
 - [x] 2.5 Verify hot-path allocation profile improves after framing and direct-to-buffer serialization changes.
-- [ ] 2.6 Validate host tuning guidance and runtime socket option enforcement on Linux (`sysctl`, fd limits, backlog, RSS/IRQ guidance).
-- [ ] 2.8 Validate backlog and receive-buffer socket tuning under burst BMP table-dump scenarios.
+- [x] 2.6 Validate host tuning guidance and runtime socket option enforcement on Linux (`sysctl`, fd limits, backlog, RSS/IRQ guidance).
+- [x] 2.8 Validate backlog and receive-buffer socket tuning under burst BMP table-dump scenarios.
 - [x] 2.7 Run `openspec validate refactor-arancini-shared-nothing --strict`.

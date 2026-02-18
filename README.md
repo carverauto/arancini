@@ -50,3 +50,15 @@ Moreover, the library is designed to facilitate decoupling these two concerns, a
 ## Contributing
 
 Refer to the Docker Compose [integration](./integration/) tests to try Risotto locally. The setup includes BIRD and GoBGP routers announcing BGP updates between them, and transmitting BMP messages to Risotto.
+
+## Linux Performance Validation
+
+For Arancini deployments, run the tuning/socket validation checks:
+
+```bash
+bash integration/bench/run_2_6_linux_tuning_validation.sh
+```
+
+This validates:
+- Runtime socket option enforcement in code (`SO_REUSEPORT`, `TCP_NODELAY`, backlog and `SO_RCVBUF` wiring).
+- Linux host tuning guidance (`sysctl`, file descriptor limits, and RSS/IRQ readiness checks).

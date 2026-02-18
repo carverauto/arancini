@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://nxthdr.dev/Arancini/logo.png" height="256" width="256" alt="Project Logo" />
-</p>
-
 # Arancini 😋
 
 **Arancini** is a carrier-grade BGP Monitoring Protocol (BMP) collector designed for ultra-high throughput and sub-millisecond telemetry pipelines. Built on a shared-nothing, thread-per-core architecture, it ingests BMP feeds from routers and streams curated BGP updates to **NATS JetStream**.

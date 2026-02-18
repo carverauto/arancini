@@ -1,103 +1,23 @@
 mod arancini;
-mod bmp;
 mod bridge;
 mod config;
 mod nats;
 mod producer;
 mod serializer;
-mod state;
 mod update_capnp;
 
 use anyhow::Result;
 use futures::future::pending;
-use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpListener;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio_graceful::Shutdown;
 use tracing::{debug, error, trace, warn};
 
-use risotto_lib::state::{new_state, AsyncState};
-use risotto_lib::state_store::memory::MemoryStore;
-use risotto_lib::state_store::store::StateStore;
 use risotto_lib::update::Update;
 
 use crate::bridge::BridgeSender;
-use crate::config::{configure, AppConfig, BMPConfig, RuntimeMode};
-
-fn build_tokio_bmp_listener(cfg: &BMPConfig) -> Result<TcpListener> {
-    let domain = match cfg.host {
-        std::net::SocketAddr::V4(_) => Domain::IPV4,
-        std::net::SocketAddr::V6(_) => Domain::IPV6,
-    };
-
-    let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_reuse_address(true)?;
-    #[cfg(unix)]
-    socket.set_reuse_port(true)?;
-    if let Some(recv_buf_size) = cfg.socket_recv_buffer_bytes {
-        socket.set_recv_buffer_size(recv_buf_size)?;
-    }
-
-    socket.bind(&cfg.host.into())?;
-    socket.listen(cfg.listener_backlog)?;
-    socket.set_nonblocking(true)?;
-
-    let std_listener: std::net::TcpListener = socket.into();
-    Ok(TcpListener::from_std(std_listener)?)
-}
-
-async fn bmp_handler<T: StateStore>(
-    state: Option<AsyncState<T>>,
-    cfg: Arc<AppConfig>,
-    tx: Sender<Update>,
-) {
-    let bmp_config = cfg.bmp.clone();
-
-    debug!("binding bmp listener to {}", bmp_config.host);
-    let bmp_listener = match build_tokio_bmp_listener(&bmp_config) {
-        Ok(listener) => listener,
-        Err(err) => {
-            error!("failed to build BMP listener: {}", err);
-            return;
-        }
-    };
-
-    loop {
-        let (mut bmp_stream, socket) = match bmp_listener.accept().await {
-            Ok(incoming) => incoming,
-            Err(err) => {
-                error!("failed to accept BMP connection: {}", err);
-                continue;
-            }
-        };
-        if let Err(err) = bmp_stream.set_nodelay(true) {
-            warn!("{}: failed to set TCP_NODELAY: {}", socket, err);
-        }
-        if let Some(recv_buf_size) = bmp_config.socket_recv_buffer_bytes {
-            let socket_ref = SockRef::from(&bmp_stream);
-            if let Err(err) = socket_ref.set_recv_buffer_size(recv_buf_size) {
-                warn!(
-                    "{}: failed to set SO_RCVBUF={} on accepted socket: {}",
-                    socket, recv_buf_size, err
-                );
-            }
-        }
-
-        let bmp_state = state.clone();
-        let tx = tx.clone();
-
-        // Spawn a new task for the BMP connection with TCP stream
-        tokio::spawn(async move {
-            if let Err(err) = bmp::handle(&mut bmp_stream, bmp_state, tx).await {
-                error!("Error handling BMP connection: {}", err);
-            }
-
-            drop(bmp_stream);
-        });
-    }
-}
+use crate::config::{configure, AppConfig};
 
 async fn arancini_handler(cfg: Arc<AppConfig>, tx: BridgeSender) {
     if let Err(err) = arancini::spawn_workers(cfg, tx) {
@@ -115,16 +35,6 @@ async fn producer_handler(cfg: Arc<AppConfig>, rx: Receiver<Update>) {
     }
 }
 
-async fn curation_state_handler<T: StateStore + serde::Serialize>(
-    state: AsyncState<T>,
-    cfg: Arc<AppConfig>,
-) {
-    let curation_config = cfg.curation.clone();
-    if let Err(err) = state::dump_handler(state.clone(), curation_config).await {
-        error!("Error dumping curation state: {}", err);
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cfg = Arc::new(configure().await?);
@@ -133,56 +43,33 @@ async fn main() -> Result<()> {
     let curation_config = cfg.curation.clone();
     let shutdown: Shutdown = Shutdown::default();
 
-    // Initialize legacy global curation state only for classic runtime mode.
-    let use_legacy_global_state =
-        cfg.runtime.mode == RuntimeMode::Risotto && curation_config.enabled;
-    if cfg.runtime.mode == RuntimeMode::Arancini && curation_config.enabled {
+    if curation_config.enabled {
         debug!("arancini curation enabled with per-worker shard state");
-    }
-
-    let state = if use_legacy_global_state {
-        debug!("curation is enabled");
-        let store = MemoryStore::new();
-        let state = new_state(store);
-        state::load(state.clone(), curation_config.clone()).await;
-        shutdown.spawn_task(curation_state_handler(state.clone(), cfg.clone()));
-        Some(state)
     } else {
-        if cfg.runtime.mode == RuntimeMode::Arancini && curation_config.enabled {
-            debug!("using Arancini per-worker shard curation (no legacy global state)");
-        } else {
-            debug!("curation is disabled - forwarding all updates as-is");
-        }
-        None
-    };
+        debug!("curation is disabled - forwarding all updates as-is");
+    }
 
     // Producer ingress channel
     let (producer_tx, rx) = channel(cfg.kafka.mpsc_buffer_size);
 
     // Initialize tasks
-    let nats_enabled_for_arancini = cfg.runtime.mode == RuntimeMode::Arancini && cfg.nats.enabled;
-    let ingress_task = if cfg.runtime.mode == RuntimeMode::Arancini {
-        let (bridge_tx, bridge_rx) =
-            bridge::bounded_channel(cfg.runtime.arancini_bridge_buffer_size);
-        if let Some(capacity) = bridge_tx.queue_capacity() {
-            debug!("arancini bridge queue capacity set to {}", capacity);
+    let (bridge_tx, bridge_rx) = bridge::bounded_channel(cfg.runtime.arancini_bridge_buffer_size);
+    if let Some(capacity) = bridge_tx.queue_capacity() {
+        debug!("arancini bridge queue capacity set to {}", capacity);
+    }
+    if cfg.nats.enabled {
+        if let Err(err) = bridge::spawn_nats_sidecar_thread(bridge_rx, cfg.nats.clone()) {
+            anyhow::bail!("failed to start arancini NATS sidecar thread: {}", err);
         }
-        if cfg.nats.enabled {
-            if let Err(err) = bridge::spawn_nats_sidecar_thread(bridge_rx, cfg.nats.clone()) {
-                anyhow::bail!("failed to start arancini NATS sidecar thread: {}", err);
-            }
-        } else {
-            warn!("arancini running without NATS sidecar enabled; using Kafka forwarder bridge");
-            if let Err(err) = bridge::spawn_sidecar_thread(bridge_rx, producer_tx.clone()) {
-                anyhow::bail!("failed to start arancini sidecar thread: {}", err);
-            }
-        }
-
-        shutdown.spawn_task(arancini_handler(cfg.clone(), bridge_tx))
     } else {
-        shutdown.spawn_task(bmp_handler(state.clone(), cfg.clone(), producer_tx.clone()))
-    };
-    let producer_task = if nats_enabled_for_arancini {
+        warn!("arancini running without NATS sidecar enabled; using Kafka forwarder bridge");
+        if let Err(err) = bridge::spawn_sidecar_thread(bridge_rx, producer_tx.clone()) {
+            anyhow::bail!("failed to start arancini sidecar thread: {}", err);
+        }
+    }
+
+    let ingress_task = shutdown.spawn_task(arancini_handler(cfg.clone(), bridge_tx));
+    let producer_task = if cfg.nats.enabled {
         shutdown.spawn_task(async { pending::<()>().await })
     } else {
         shutdown.spawn_task(producer_handler(cfg.clone(), rx))

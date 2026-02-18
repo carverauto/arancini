@@ -86,9 +86,8 @@ load_routes() {
 
 run_profile() {
   local name="$1"
-  local runtime_mode="$2"
-  local workers="$3"
-  local metrics_port="$4"
+  local workers="$2"
+  local metrics_port="$3"
 
   local compose_file="$ROOT_DIR/integration/compose.yml"
   local project="ovn-bench-${name}"
@@ -98,7 +97,7 @@ run_profile() {
   cat >"$override_file" <<EOFYML
 services:
   risotto:
-    command: -v --runtime-mode=${runtime_mode} --arancini-workers=${workers} --kafka-disable --curation-disable --curation-state-path=/app/state.bin
+    command: -v --arancini-workers=${workers} --kafka-disable --curation-disable --curation-state-path=/app/state.bin
 EOFYML
 
   local -a compose=(docker compose -f "$compose_file" -f "$override_file" -p "$project")
@@ -204,8 +203,8 @@ EOFYML
 }
 
 ARANCINI_WORKERS="${ARANCINI_WORKERS:-4}"
-run_profile "risotto" "risotto" "$ARANCINI_WORKERS" "18083"
-run_profile "arancini" "arancini" "$ARANCINI_WORKERS" "18084"
+run_profile "risotto" "$ARANCINI_WORKERS" "18083"
+run_profile "arancini" "$ARANCINI_WORKERS" "18084"
 
 if [[ "${RX_DELTA[risotto]}" == "0" || "${RX_DELTA[arancini]}" == "0" ]]; then
   echo "invalid benchmark: rx_update delta is zero for at least one runtime profile" >&2

@@ -65,7 +65,7 @@ This validates:
 
 ## Runtime Benchmark (Risotto vs Arancini)
 
-Use this script to benchmark runtime throughput directly (`--runtime-mode=risotto` vs `--runtime-mode=arancini`) with producer paths disabled:
+Use this script to benchmark Arancini runtime throughput with producer paths disabled:
 
 ```bash
 ROUTE_COUNT_PER_BIRD=2000 TARGET_RX_DELTA=2000 TIMEOUT_SECONDS=180 ARANCINI_WORKERS=4 \
@@ -95,8 +95,7 @@ Example:
 
 ```bash
 ./target/release/risotto \
-  --runtime-mode=arancini \
-  --nats-sidecar-enable \
+  --nats-enable \
   --nats-server nats://nats.example.net:4222 \
   --nats-tls-required \
   --nats-tls-ca-cert-path /etc/risotto/nats/ca.pem \

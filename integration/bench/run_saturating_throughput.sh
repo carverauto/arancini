@@ -71,8 +71,7 @@ inject_routes_from_peer() {
 
 run_trial() {
   local name="$1"
-  local runtime_mode="$2"
-  local metrics_port="$3"
+  local metrics_port="$2"
 
   local project="saturn-${name}"
   local metrics_url="http://127.0.0.1:${metrics_port}/metrics"
@@ -98,7 +97,7 @@ services:
     depends_on:
       - risotto
   risotto:
-    command: -v --runtime-mode=${runtime_mode} --arancini-workers=${ARANCINI_WORKERS} --kafka-disable --curation-disable --curation-state-path=/app/state.bin
+    command: -v --arancini-workers=${ARANCINI_WORKERS} --kafka-disable --curation-disable --curation-state-path=/app/state.bin
 EOFYML
 
   local -a compose=(docker compose -f "$ROOT_DIR/integration/compose.yml" -f "$override_file" -p "$project")
@@ -172,8 +171,8 @@ EOFYML
   )
 }
 
-run_trial "risotto" "risotto" "18091"
-run_trial "arancini" "arancini" "18092"
+run_trial "risotto" "18091"
+run_trial "arancini" "18092"
 
 if [[ "${RX_DELTA[risotto]}" == "0" || "${RX_DELTA[arancini]}" == "0" ]]; then
   echo "invalid benchmark: rx deltas were zero (risotto=${RX_DELTA[risotto]}, arancini=${RX_DELTA[arancini]})" >&2

@@ -224,7 +224,7 @@ run_profile \
   "$ROOT_DIR" \
   "$ROOT_DIR/integration/compose.yml" \
   "18082" \
-  "-v --runtime-mode=risotto --kafka-brokers=10.0.0.100:9092 --curation-state-path=/app/state.bin" \
+  "-v --arancini-workers=4 --kafka-brokers=10.0.0.100:9092 --curation-state-path=/app/state.bin" \
   "130" \
   "140"
 
@@ -233,7 +233,7 @@ run_profile \
   "$ROOT_DIR" \
   "$ROOT_DIR/integration/compose.yml" \
   "18083" \
-  "-v --runtime-mode=arancini --arancini-workers=4 --kafka-brokers=10.0.0.100:9092 --curation-state-path=/app/state.bin" \
+  "-v --arancini-workers=4 --kafka-brokers=10.0.0.100:9092 --curation-state-path=/app/state.bin" \
   "150" \
   "160"
 

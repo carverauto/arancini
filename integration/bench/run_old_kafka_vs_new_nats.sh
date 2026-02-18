@@ -219,7 +219,7 @@ services:
       integration:
         ipv4_address: 10.0.0.110
   risotto:
-    command: -v --runtime-mode=arancini --arancini-workers=4 --kafka-disable --nats-enable --nats-server=nats://10.0.0.110:4222 --nats-subject=arancini.updates --curation-state-path=/app/state.bin
+    command: -v --arancini-workers=4 --kafka-disable --nats-enable --nats-server=nats://10.0.0.110:4222 --nats-subject=arancini.updates --curation-state-path=/app/state.bin
 EOF
 
   local -a compose=(docker compose -f "$compose_file" -f "$override_file" -p "$project")

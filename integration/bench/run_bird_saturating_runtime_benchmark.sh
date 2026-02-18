@@ -91,8 +91,7 @@ render_bird_conf() {
 
 run_profile() {
   local name="$1"
-  local runtime_mode="$2"
-  local metrics_port="$3"
+  local metrics_port="$2"
 
   local bird30_conf="$WORK_DIR/${name}-bird30.conf"
   local bird40_conf="$WORK_DIR/${name}-bird40.conf"
@@ -109,7 +108,7 @@ services:
     volumes:
       - ${bird40_conf}:/etc/bird/bird.conf:ro
   risotto:
-    command: -v --runtime-mode=${runtime_mode} --arancini-workers=${ARANCINI_WORKERS} --kafka-disable --curation-disable --curation-state-path=/app/state.bin
+    command: -v --arancini-workers=${ARANCINI_WORKERS} --kafka-disable --curation-disable --curation-state-path=/app/state.bin
 EOFYML
 
   local -a compose=(docker compose -f "$ROOT_DIR/integration/compose.yml" -f "$override_file" -p "birdbench")
@@ -182,8 +181,8 @@ EOFYML
   )
 }
 
-run_profile "risotto" "risotto" "18093"
-run_profile "arancini" "arancini" "18094"
+run_profile "risotto" "18093"
+run_profile "arancini" "18094"
 
 if [[ "${RX_DELTA[risotto]}" == "0" || "${RX_DELTA[arancini]}" == "0" ]]; then
   echo "invalid benchmark: rx deltas were zero (risotto=${RX_DELTA[risotto]}, arancini=${RX_DELTA[arancini]})" >&2

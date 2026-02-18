@@ -2,6 +2,7 @@ mod arancini;
 mod bmp;
 mod bridge;
 mod config;
+mod nats;
 mod producer;
 mod serializer;
 mod state;

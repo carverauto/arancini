@@ -1053,15 +1053,13 @@ async fn snapshot_sidecar_loop(
     curation_cfg: CurationConfig,
     nats_cfg: NatsConfig,
 ) -> Result<()> {
-    let client = async_nats::connect(nats_cfg.server.clone())
-        .await
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "failed to connect snapshot sidecar to NATS {}: {}",
-                nats_cfg.server,
-                err
-            )
-        })?;
+    let client = crate::nats::connect(&nats_cfg).await.map_err(|err| {
+        anyhow::anyhow!(
+            "failed to connect snapshot sidecar to NATS {}: {}",
+            nats_cfg.server,
+            err
+        )
+    })?;
     let js = jetstream::new(client);
     let kv = get_or_create_kv_store(&js, &curation_cfg.snapshot_nats_kv_bucket).await?;
     let object_store =

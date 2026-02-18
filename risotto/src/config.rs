@@ -4,6 +4,7 @@ use clap_verbosity_flag::{InfoLevel, Verbosity};
 use futures::future::try_join_all;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use tokio::net::lookup_host;
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,11 @@ pub struct NatsConfig {
     pub server: String,
     pub subject: String,
     pub max_in_flight_acks: usize,
+    pub tls_required: bool,
+    pub tls_first: bool,
+    pub tls_ca_cert_path: Option<PathBuf>,
+    pub tls_client_cert_path: Option<PathBuf>,
+    pub tls_client_key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +194,26 @@ pub struct Cli {
     /// Max number of in-flight JetStream ACK futures handled by sidecar
     #[arg(long, default_value_t = 4096)]
     pub nats_max_in_flight_acks: usize,
+
+    /// Require TLS for NATS connection
+    #[arg(long)]
+    pub nats_tls_required: bool,
+
+    /// Use TLS-first handshake mode for NATS (server must support handshake_first)
+    #[arg(long)]
+    pub nats_tls_first: bool,
+
+    /// PEM bundle path for NATS TLS root CA certificates
+    #[arg(long)]
+    pub nats_tls_ca_cert_path: Option<PathBuf>,
+
+    /// PEM path for NATS client certificate (mTLS)
+    #[arg(long)]
+    pub nats_tls_client_cert_path: Option<PathBuf>,
+
+    /// PEM path for NATS client private key (mTLS)
+    #[arg(long)]
+    pub nats_tls_client_key_path: Option<PathBuf>,
 
     /// Metrics listener address (IP or FQDN) for Prometheus endpoint
     #[arg(long, default_value = "0.0.0.0:8080")]
@@ -394,6 +420,12 @@ pub async fn configure() -> Result<AppConfig> {
     // Set up tracing
     set_logging(&cli).map_err(|e| anyhow::anyhow!("Failed to set up logging: {}", e))?;
 
+    if cli.nats_tls_client_cert_path.is_some() ^ cli.nats_tls_client_key_path.is_some() {
+        anyhow::bail!(
+            "both --nats-tls-client-cert-path and --nats-tls-client-key-path must be provided for mTLS"
+        );
+    }
+
     // Resolve addresses
     let (bmp_addr, metrics_addr) = tokio::try_join!(
         resolve_address(cli.bmp_address),
@@ -461,6 +493,11 @@ pub async fn configure() -> Result<AppConfig> {
             server: cli.nats_server,
             subject: cli.nats_subject,
             max_in_flight_acks: cli.nats_max_in_flight_acks,
+            tls_required: cli.nats_tls_required,
+            tls_first: cli.nats_tls_first,
+            tls_ca_cert_path: cli.nats_tls_ca_cert_path,
+            tls_client_cert_path: cli.nats_tls_client_cert_path,
+            tls_client_key_path: cli.nats_tls_client_key_path,
         },
         curation: CurationConfig {
             enabled: !cli.curation_disable,

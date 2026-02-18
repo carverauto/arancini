@@ -137,9 +137,7 @@ fn afi_safi_subject_token(update: &Update) -> String {
 }
 
 async fn nats_sidecar_publisher(rx: BridgeRx, cfg: NatsConfig) -> Result<()> {
-    let client = async_nats::connect(cfg.server.clone())
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to connect to NATS at {}: {}", cfg.server, err))?;
+    let client = crate::nats::connect(&cfg).await?;
     let jetstream = jetstream::new(client);
     let mut in_flight_acks: FuturesUnordered<AckWaiter> = FuturesUnordered::new();
 

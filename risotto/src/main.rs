@@ -1,3 +1,4 @@
+mod arancini;
 mod bmp;
 mod config;
 mod producer;
@@ -18,7 +19,7 @@ use risotto_lib::state_store::memory::MemoryStore;
 use risotto_lib::state_store::store::StateStore;
 use risotto_lib::update::Update;
 
-use crate::config::{configure, AppConfig};
+use crate::config::{configure, AppConfig, RuntimeMode};
 
 async fn bmp_handler<T: StateStore>(
     state: Option<AsyncState<T>>,
@@ -43,6 +44,17 @@ async fn bmp_handler<T: StateStore>(
 
             drop(bmp_stream);
         });
+    }
+}
+
+async fn arancini_handler(cfg: Arc<AppConfig>, tx: Sender<Update>) {
+    if cfg.curation.enabled {
+        error!("arancini runtime currently requires curation to be disabled (--curation-disable)");
+        return;
+    }
+
+    if let Err(err) = arancini::spawn_workers(cfg, tx) {
+        error!("failed to spawn arancini workers: {}", err);
     }
 }
 
@@ -88,12 +100,16 @@ async fn main() -> Result<()> {
     let (tx, rx) = channel(cfg.kafka.mpsc_buffer_size);
 
     // Initialize tasks
-    let bmp_task = shutdown.spawn_task(bmp_handler(state.clone(), cfg.clone(), tx.clone()));
+    let ingress_task = if cfg.runtime.mode == RuntimeMode::Arancini {
+        shutdown.spawn_task(arancini_handler(cfg.clone(), tx.clone()))
+    } else {
+        shutdown.spawn_task(bmp_handler(state.clone(), cfg.clone(), tx.clone()))
+    };
     let producer_task = shutdown.spawn_task(producer_handler(cfg.clone(), rx));
     tokio::select! {
         biased;
         _ = shutdown.shutdown_with_limit(Duration::from_secs(1)) => {}
-        _ = bmp_task => {}
+        _ = ingress_task => {}
         _ = producer_task => {}
     }
 

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use futures::future::try_join_all;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -8,9 +8,22 @@ use tokio::net::lookup_host;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
+    pub runtime: RuntimeConfig,
     pub bmp: BMPConfig,
     pub kafka: KafkaConfig,
     pub curation: CurationConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RuntimeMode {
+    Risotto,
+    Arancini,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    pub mode: RuntimeMode,
+    pub arancini_workers: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +57,14 @@ pub struct CurationConfig {
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Risotto BGP Monitoring Protocol (BMP) collector", long_about = None)]
 pub struct Cli {
+    /// Runtime mode: classic tokio ("risotto") or monoio workers ("arancini")
+    #[arg(long, value_enum, default_value_t = RuntimeMode::Risotto)]
+    pub runtime_mode: RuntimeMode,
+
+    /// Number of monoio worker threads used by Arancini runtime mode
+    #[arg(long, default_value_t = num_cpus::get())]
+    pub arancini_workers: usize,
+
     /// BMP listener address (IP or FQDN)
     #[arg(long, default_value = "0.0.0.0:4000")]
     pub bmp_address: String,
@@ -203,6 +224,10 @@ pub async fn configure() -> Result<AppConfig> {
     set_metrics(metrics_addr);
 
     Ok(AppConfig {
+        runtime: RuntimeConfig {
+            mode: cli.runtime_mode,
+            arancini_workers: cli.arancini_workers,
+        },
         bmp: BMPConfig { host: bmp_addr },
         kafka: KafkaConfig {
             disable: cli.kafka_disable,

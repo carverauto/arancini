@@ -19,9 +19,12 @@ capnp = "0.25.0"
 chrono = "0.4.40"
 clap = { version = "4.5.23", features = ["derive"] }
 clap-verbosity-flag = {version = "3.0.2", features = ["tracing"]}
+core_affinity = "0.8.3"
 futures = "0.3.31"
 metrics = "0.24.1"
 metrics-exporter-prometheus = "0.18.0"
+monoio = { version = "0.2.4", features = ["macros"] }
+num_cpus = "1.17.0"
 rdkafka = "0.39.0"
 risotto-lib = { path = "../risotto-lib", version = "0.6.0" }
 serde = { version = "1.0.217", features = ["derive"] }

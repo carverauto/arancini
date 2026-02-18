@@ -6,7 +6,7 @@
 
 Arancini 😋 is a high-performance collector that processes BMP messages from routers and publishes updates to NATS JetStream. This repository includes both the Arancini collector application and the Arancini library. Arancini is a fork of [Risotto](https://github.com/nxthdr/risotto).
 
-The collector application streams BGP updates to a Kafka topic, enabling downstream components to consume them. The library offers essential components for decoding BMP messages and generating BGP updates.
+The collector application streams BGP updates to a NATS JetStream stream, enabling downstream components to consume them. The library offers essential components for decoding BMP messages and generating BGP updates.
 
 ## Quick Start
 

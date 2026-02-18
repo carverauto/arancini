@@ -37,6 +37,7 @@ tokio = { version = "1.42.0", features = ["full"] }
 tokio-graceful = "0.2.2"
 tracing = "0.1.41"
 tracing-subscriber = {version= "0.3.19", features = ["fmt", "env-filter"]}
+rustls = { version = "0.23.32", default-features = false, features = ["aws_lc_rs"] }
 
 [build-dependencies]
 capnpc = "0.25.0"

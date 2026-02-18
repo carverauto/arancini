@@ -1,9 +1,19 @@
 use anyhow::Result;
 use async_nats::{Client, ConnectOptions};
+use std::sync::Once;
 
 use crate::config::NatsConfig;
 
+fn ensure_rustls_provider_installed() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
+
 pub(crate) async fn connect(cfg: &NatsConfig) -> Result<Client> {
+    ensure_rustls_provider_installed();
+
     let mut options = ConnectOptions::new();
 
     let has_tls_material = cfg.tls_ca_cert_path.is_some()

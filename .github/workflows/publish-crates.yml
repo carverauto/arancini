@@ -64,12 +64,29 @@ jobs:
 
       - name: Package check (arancini)
         if: env.DRY_RUN != 'true'
-        run: cargo package -p arancini --locked
+        run: |
+          for i in {1..12}; do
+            if cargo package -p arancini --locked; then
+              exit 0
+            fi
+            echo "arancini package check failed (attempt $i), waiting for crates index..."
+            sleep 15
+          done
+          echo "arancini package check failed after retries"
+          exit 1
 
       - name: Publish arancini
         if: env.DRY_RUN != 'true'
         run: |
-          cargo publish -p arancini --locked
+          for i in {1..12}; do
+            if cargo publish -p arancini --locked; then
+              exit 0
+            fi
+            echo "arancini publish failed (attempt $i), waiting for crates index..."
+            sleep 15
+          done
+          echo "arancini publish failed after retries"
+          exit 1
 
       - name: Note dry-run limitation
         if: env.DRY_RUN == 'true'

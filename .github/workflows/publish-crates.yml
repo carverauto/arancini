@@ -55,7 +55,18 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             cargo publish -p arancini-lib --locked --dry-run
           else
-            cargo publish -p arancini-lib --locked
+            set +e
+            out=$(cargo publish -p arancini-lib --locked 2>&1)
+            rc=$?
+            set -e
+            echo "$out"
+            if [ $rc -ne 0 ]; then
+              if echo "$out" | grep -q "already exists on crates.io index"; then
+                echo "arancini-lib already published; continuing."
+              else
+                exit $rc
+              fi
+            fi
           fi
 
       - name: Wait for index propagation
@@ -79,7 +90,16 @@ jobs:
         if: env.DRY_RUN != 'true'
         run: |
           for i in {1..12}; do
-            if cargo publish -p arancini --locked; then
+            set +e
+            out=$(cargo publish -p arancini --locked 2>&1)
+            rc=$?
+            set -e
+            echo "$out"
+            if [ $rc -eq 0 ]; then
+              exit 0
+            fi
+            if echo "$out" | grep -q "already exists on crates.io index"; then
+              echo "arancini already published; continuing."
               exit 0
             fi
             echo "arancini publish failed (attempt $i), waiting for crates index..."

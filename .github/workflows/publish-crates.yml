@@ -50,9 +50,6 @@ jobs:
       - name: Package check (arancini-lib)
         run: cargo package -p arancini-lib --locked
 
-      - name: Package check (arancini)
-        run: cargo package -p arancini --locked
-
       - name: Publish arancini-lib
         run: |
           if [ "$DRY_RUN" = "true" ]; then
@@ -65,10 +62,17 @@ jobs:
         if: env.DRY_RUN != 'true'
         run: sleep 30
 
+      - name: Package check (arancini)
+        if: env.DRY_RUN != 'true'
+        run: cargo package -p arancini --locked
+
       - name: Publish arancini
+        if: env.DRY_RUN != 'true'
         run: |
-          if [ "$DRY_RUN" = "true" ]; then
-            cargo publish -p arancini --locked --dry-run
-          else
-            cargo publish -p arancini --locked
-          fi
+          cargo publish -p arancini --locked
+
+      - name: Note dry-run limitation
+        if: env.DRY_RUN == 'true'
+        run: |
+          echo "Dry-run published/validated arancini-lib only."
+          echo "arancini publish checks require arancini-lib on crates.io and are skipped in dry-run mode."

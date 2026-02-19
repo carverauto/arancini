@@ -1,0 +1,74 @@
+name: Publish Crates
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run cargo publish --dry-run only"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: main
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate workspace
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --locked --verbose
+
+      - name: Package check (arancini-lib)
+        run: cargo package -p arancini-lib --locked
+
+      - name: Package check (arancini)
+        run: cargo package -p arancini --locked
+
+      - name: Publish arancini-lib
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            cargo publish -p arancini-lib --locked --dry-run
+          else
+            cargo publish -p arancini-lib --locked
+          fi
+
+      - name: Wait for index propagation
+        if: env.DRY_RUN != 'true'
+        run: sleep 30
+
+      - name: Publish arancini
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            cargo publish -p arancini --locked --dry-run
+          else
+            cargo publish -p arancini --locked
+          fi

@@ -3,12 +3,12 @@ resolver = "2"
 members = ["arancini", "arancini-lib"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 license = "MIT"
 readme = "README.md"
 description = "High-performance BMP collector"
 repository = "https://github.com/carverauto/arancini"
-homepage = "https://nxthdr.dev"
+homepage = "https://github.com/carverauto"
 keywords = ["BGP", "BMP", "collector"]
 exclude = [
      ".github/*",

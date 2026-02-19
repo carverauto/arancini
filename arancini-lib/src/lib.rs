@@ -57,17 +57,10 @@ pub async fn process_bmp_message<T: StateStore, S: UpdateSender>(
         BmpMessageBody::PeerUpNotification(body) => {
             trace!("{}: {:?}", socket, body);
             if metadata.is_none() {
-                anyhow::bail!(
-                    "{}: PeerUpNotification: no per-peer header",
-                    socket
-                );
+                anyhow::bail!("{}: PeerUpNotification: no per-peer header", socket);
             }
             let metadata = metadata.unwrap();
-            debug!(
-                "{}: PeerUpNotification: {}",
-                socket,
-                metadata.peer_addr
-            );
+            debug!("{}: PeerUpNotification: {}", socket, metadata.peer_addr);
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_up_notification")
                 .increment(1);
             peer_up_notification(state, tx, metadata, body).await?;
@@ -75,10 +68,7 @@ pub async fn process_bmp_message<T: StateStore, S: UpdateSender>(
         BmpMessageBody::RouteMonitoring(body) => {
             trace!("{}: {:?}", socket, body);
             if metadata.is_none() {
-                anyhow::bail!(
-                    "{}: RouteMonitoring - no per-peer header",
-                    socket
-                );
+                anyhow::bail!("{}: RouteMonitoring - no per-peer header", socket);
             }
             let metadata = metadata.unwrap();
             // We do not process the message if the peer address is unspecified
@@ -99,17 +89,12 @@ pub async fn process_bmp_message<T: StateStore, S: UpdateSender>(
         BmpMessageBody::PeerDownNotification(body) => {
             trace!("{}: {:?}", socket, body);
             if metadata.is_none() {
-                anyhow::bail!(
-                    "{}: PeerDownNotification: no per-peer header",
-                    socket
-                );
+                anyhow::bail!("{}: PeerDownNotification: no per-peer header", socket);
             }
             let metadata = metadata.unwrap();
             debug!(
                 "{}: PeerDownNotification: {}. Reason: {:?}",
-                socket,
-                metadata.peer_addr,
-                body.reason
+                socket, metadata.peer_addr, body.reason
             );
             counter!(metric_name, "router" =>  socket.ip().to_string(), "type" => "peer_down_notification")
                 .increment(1);

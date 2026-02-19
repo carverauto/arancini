@@ -1,4 +1,5 @@
 use anyhow::Result;
+use arancini_lib::update::Update;
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::FutureExt;
 use metrics::counter;
@@ -7,7 +8,6 @@ use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::future_producer::OwnedDeliveryResult;
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use arancini_lib::update::Update;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tracing::{debug, error, trace};

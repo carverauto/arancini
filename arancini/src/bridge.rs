@@ -1,12 +1,12 @@
 use anyhow::Result;
+use arancini_lib::sender::UpdateSender;
+use arancini_lib::update::Update;
 use async_nats::jetstream;
 use crossfire::mpsc;
 use crossfire::{AsyncRxTrait, AsyncTxTrait};
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::FutureExt;
 use metrics::{counter, gauge, histogram};
-use arancini_lib::sender::UpdateSender;
-use arancini_lib::update::Update;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -294,9 +294,9 @@ pub(crate) fn spawn_nats_sidecar_thread(rx: BridgeRx, cfg: NatsConfig) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arancini_lib::update::UpdateAttributes;
     use chrono::Utc;
     use futures::FutureExt;
-    use arancini_lib::update::UpdateAttributes;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::sync::Arc;
     use tokio::sync::mpsc;

@@ -1,4 +1,10 @@
 use anyhow::Result;
+use arancini_lib::processor::decode_bmp_message;
+use arancini_lib::sender::UpdateSender;
+use arancini_lib::state::{synthesize_withdraw_update, State};
+use arancini_lib::state_store::memory::MemoryStore;
+use arancini_lib::state_store::store::StateStore;
+use arancini_lib::update::{decode_updates, new_metadata, Update, UpdateMetadata};
 use async_nats::jetstream;
 use bgpkit_parser::bmp::messages::{PeerDownNotification, RouteMonitoring};
 use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
@@ -14,12 +20,6 @@ use monoio::io::AsyncReadRent;
 use monoio::net::{ListenerOpts, TcpListener, TcpStream};
 use monoio::time::sleep;
 use monoio::{FusionDriver, RuntimeBuilder};
-use arancini_lib::processor::decode_bmp_message;
-use arancini_lib::sender::UpdateSender;
-use arancini_lib::state::{synthesize_withdraw_update, State};
-use arancini_lib::state_store::memory::MemoryStore;
-use arancini_lib::state_store::store::StateStore;
-use arancini_lib::update::{decode_updates, new_metadata, Update, UpdateMetadata};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -447,9 +447,7 @@ pub fn spawn_workers<S: UpdateSender>(cfg: Arc<AppConfig>, tx: S) -> Result<()> 
                     let _ = core_affinity::set_for_current(core_id);
                 }
 
-                let mut runtime = match RuntimeBuilder::<FusionDriver>::new()
-                    .enable_timer()
-                    .build()
+                let mut runtime = match RuntimeBuilder::<FusionDriver>::new().enable_timer().build()
                 {
                     Ok(runtime) => runtime,
                     Err(err) => {
@@ -1415,9 +1413,9 @@ async fn process_bmp_message_shard<S: UpdateSender>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arancini_lib::update::{UpdateAttributes, UpdateMetadata};
     use bgpkit_parser::bmp::messages::PeerDownReason;
     use chrono::Utc;
-    use arancini_lib::update::{UpdateAttributes, UpdateMetadata};
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::{Notify, Semaphore};

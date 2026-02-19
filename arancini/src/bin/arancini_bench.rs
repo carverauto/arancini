@@ -3,12 +3,12 @@ mod serializer;
 #[path = "../update_capnp.rs"]
 mod update_capnp;
 
-use bytes::BytesMut;
-use chrono::Utc;
-use core_affinity::CoreId;
 use arancini_lib::state::State;
 use arancini_lib::state_store::memory::MemoryStore;
 use arancini_lib::update::{map_to_ipv6, Update, UpdateAttributes};
+use bytes::BytesMut;
+use chrono::Utc;
+use core_affinity::CoreId;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::net::{IpAddr, Ipv4Addr};

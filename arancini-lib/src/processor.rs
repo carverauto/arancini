@@ -16,7 +16,7 @@ use crate::update::{decode_updates, UpdateMetadata};
 pub fn decode_bmp_message(bytes: &mut Bytes) -> Result<BmpMessage> {
     let message = match parse_bmp_msg(bytes) {
         Ok(message) => message,
-        Err(_) => return Err(anyhow::anyhow!("failed to parse BMP message")),
+        Err(err) => return Err(anyhow::anyhow!("failed to parse BMP message: {}", err)),
     };
 
     Ok(message)

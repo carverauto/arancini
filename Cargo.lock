@@ -97,7 +97,7 @@ checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
 name = "arancini"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "arancini-lib",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "arancini-lib"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ahash",
  "anyhow",

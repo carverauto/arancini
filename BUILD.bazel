@@ -1,0 +1,29 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "Cargo.lock",
+    "Cargo.toml",
+])
+
+filegroup(
+    name = "workspace_files",
+    srcs = glob(
+        [
+            "Cargo.lock",
+            "Cargo.toml",
+            "LICENSE",
+            "README.md",
+            "arancini/**",
+            "arancini-lib/**",
+        ],
+        exclude = [
+            ".git/**",
+            "target/**",
+            "**/*.md",
+            "**/target/**",
+            "**/.DS_Store",
+        ],
+    ) + [
+        "README.md",
+    ],
+)

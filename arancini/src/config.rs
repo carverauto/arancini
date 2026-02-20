@@ -283,6 +283,10 @@ fn set_metrics(metrics_address: SocketAddr) {
         "Total number of BMP messages received"
     );
     metrics::describe_counter!(
+        "risotto_bmp_parse_errors_total",
+        "Total number of BMP messages that failed to parse"
+    );
+    metrics::describe_counter!(
         "risotto_rx_updates_total",
         "Total number of updates received"
     );

@@ -35,6 +35,10 @@ use crate::config::{AppConfig, BMPConfig, CurationConfig, NatsConfig, SnapshotBa
 
 const BMP_COMMON_HEADER_LEN: usize = 6;
 const BMP_MAX_MESSAGE_TYPE: u8 = 6;
+const SNAPSHOT_RESTORE_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+const SNAPSHOT_RESTORE_KV_GET_TIMEOUT: Duration = Duration::from_secs(5);
+const SNAPSHOT_RESTORE_OBJECT_GET_TIMEOUT: Duration = Duration::from_secs(5);
+const SNAPSHOT_RESTORE_OBJECT_READ_TIMEOUT: Duration = Duration::from_secs(10);
 type WorkerShardState = Arc<Mutex<State<MemoryStore>>>;
 type SnapshotFlavor = mpsc::Array<SnapshotCommand>;
 type SnapshotTx = crossfire::MAsyncTx<SnapshotFlavor>;
@@ -90,13 +94,20 @@ impl SnapshotBridge {
                 .set(self.tx.len() as f64 / capacity as f64);
         }
         gauge!("risotto_arancini_snapshot_queue_depth").set(self.tx.len() as f64);
-        match reply_rx.await {
-            Ok(Ok(payload)) => Ok(payload),
-            Ok(Err(err)) => Err(anyhow::anyhow!("{}", err)),
-            Err(err) => Err(anyhow::anyhow!(
+        match tokio::time::timeout(SNAPSHOT_RESTORE_REPLY_TIMEOUT, reply_rx).await {
+            Ok(Ok(Ok(payload))) => Ok(payload),
+            Ok(Ok(Err(err))) => Err(anyhow::anyhow!("{}", err)),
+            Ok(Err(err)) => Err(anyhow::anyhow!(
                 "failed waiting for snapshot restore response: {}",
                 err
             )),
+            Err(_) => {
+                warn!(
+                    "timed out waiting for snapshot restore response for worker {} after {:?}; continuing without snapshot",
+                    worker_id, SNAPSHOT_RESTORE_REPLY_TIMEOUT
+                );
+                Ok(None)
+            }
         }
     }
 }
@@ -658,8 +669,20 @@ async fn handle_connection<S: UpdateSender>(
                 packet_length
             );
             let mut bytes = frame_buffer.split_to(packet_length).freeze();
-            process_bmp_message_shard(shard.clone(), tx.clone(), worker_id, socket, &mut bytes)
-                .await?;
+            if let Err(err) =
+                process_bmp_message_shard(shard.clone(), tx.clone(), worker_id, socket, &mut bytes)
+                    .await
+            {
+                if err.to_string().contains("failed to parse BMP message") {
+                    counter!("risotto_bmp_parse_errors_total").increment(1);
+                    warn!(
+                        "{}: dropping unparseable BMP packet and continuing: {}",
+                        socket, err
+                    );
+                    continue;
+                }
+                return Err(err);
+            }
         }
 
         if frame_buffer.len() > cfg.arancini_max_frame_size_bytes {
@@ -1126,15 +1149,27 @@ async fn snapshot_sidecar_loop(
             SnapshotCommand::Restore { worker_id, reply } => {
                 let response = async {
                     let manifest_key = worker_snapshot_manifest_key(worker_id);
-                    let manifest_bytes = match kv.get(manifest_key.clone()).await {
-                        Ok(Some(bytes)) => bytes,
-                        Ok(None) => return Ok(None),
-                        Err(err) => {
+                    let manifest_bytes = match tokio::time::timeout(
+                        SNAPSHOT_RESTORE_KV_GET_TIMEOUT,
+                        kv.get(manifest_key.clone()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Some(bytes))) => bytes,
+                        Ok(Ok(None)) => return Ok(None),
+                        Ok(Err(err)) => {
                             return Err(anyhow::anyhow!(
                                 "failed kv get for {}: {}",
                                 manifest_key,
                                 err
                             ))
+                        }
+                        Err(_) => {
+                            warn!(
+                                "snapshot sidecar timed out kv get for {} after {:?}; continuing without snapshot",
+                                manifest_key, SNAPSHOT_RESTORE_KV_GET_TIMEOUT
+                            );
+                            return Ok(None);
                         }
                     };
                     let manifest: SnapshotManifest = serde_json::from_slice(&manifest_bytes)
@@ -1142,21 +1177,39 @@ async fn snapshot_sidecar_loop(
                             anyhow::anyhow!("failed to decode manifest json: {}", err)
                         })?;
 
-                    let mut object = object_store
-                        .get(manifest.object_name.clone())
-                        .await
-                        .map_err(|err| {
-                            anyhow::anyhow!(
-                                "failed object-store get for {}: {}",
-                                manifest.object_name,
-                                err
-                            )
-                        })?;
+                    let mut object = tokio::time::timeout(
+                        SNAPSHOT_RESTORE_OBJECT_GET_TIMEOUT,
+                        object_store.get(manifest.object_name.clone()),
+                    )
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "timed out object-store get for {} after {:?}",
+                            manifest.object_name,
+                            SNAPSHOT_RESTORE_OBJECT_GET_TIMEOUT
+                        )
+                    })?
+                    .map_err(|err| {
+                        anyhow::anyhow!(
+                            "failed object-store get for {}: {}",
+                            manifest.object_name,
+                            err
+                        )
+                    })?;
                     let mut payload = Vec::with_capacity(manifest.payload_size_bytes);
-                    object
-                        .read_to_end(&mut payload)
-                        .await
-                        .map_err(|err| anyhow::anyhow!("failed reading object payload: {}", err))?;
+                    tokio::time::timeout(
+                        SNAPSHOT_RESTORE_OBJECT_READ_TIMEOUT,
+                        object.read_to_end(&mut payload),
+                    )
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "timed out reading object payload for {} after {:?}",
+                            manifest.object_name,
+                            SNAPSHOT_RESTORE_OBJECT_READ_TIMEOUT
+                        )
+                    })?
+                    .map_err(|err| anyhow::anyhow!("failed reading object payload: {}", err))?;
                     Ok(Some(payload))
                 }
                 .await

@@ -104,4 +104,4 @@ This repository contains:
 - Router BMP sources (e.g., GoBGP, BIRD, vendor routers)
 - Prometheus scraper for `/metrics` endpoint
 - Optional downstream consumers (integration setup uses ClickHouse Kafka engine)
-- Container registry publishing via GitHub Container Registry (`ghcr.io`)
+- Container registry publishing via Harbor (`registry.carverauto.dev/serviceradar`)

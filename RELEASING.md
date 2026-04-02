@@ -9,7 +9,7 @@
 
 1. Ensure `arancini/Cargo.toml` workspace version is set to the target release version.
 2. Commit and push changes.
-3. Run GitHub Actions workflow `Publish Crates`:
+3. Run Forgejo Actions workflow `Publish Crates`:
    - First run with `dry_run=true`.
    - Then run with `dry_run=false` to publish.
 

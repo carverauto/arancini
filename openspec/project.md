@@ -28,7 +28,7 @@ This repository contains:
   - Metrics: `metrics` + `metrics-exporter-prometheus`
 - Build/tooling:
   - Cargo workspace with crates `risotto` and `risotto-lib`
-  - GitHub Actions CI (`cargo check --locked`, `cargo test --locked`)
+  - Forgejo Actions CI (`cargo check --locked`, `cargo test --locked`)
   - Docker multi-stage builds using `cargo-chef`
   - Renovate for dependency update automation
 

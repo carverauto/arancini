@@ -13,18 +13,22 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-    - run: sudo apt install libpcap-dev libsasl2-dev libssl-dev capnproto
-    - uses: Swatinem/rust-cache@v2
-    - run: |
-        cargo check --locked
-        cargo test --locked --verbose
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo check --locked
+          cargo test --locked --verbose
 
   docker:
     strategy:
       fail-fast: false
       matrix:
-        os: [{name: ubuntu-24.04, arch: amd64}, {name: ubuntu-24.04-arm, arch: arm64}]
+        os:
+          - name: ubuntu-24.04
+            arch: amd64
+          - name: ubuntu-24.04-arm
+            arch: arm64
 
     permissions:
       contents: read
@@ -48,7 +52,7 @@ jobs:
           username: ${{ secrets.HARBOR_ROBOT_USERNAME }}
           password: ${{ secrets.HARBOR_ROBOT_SECRET }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:

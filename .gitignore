@@ -1,2 +1,4 @@
 /target
 integration/bench/jetstream_admin/target
+
+.idea/

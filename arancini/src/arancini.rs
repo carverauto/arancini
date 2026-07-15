@@ -1,10 +1,10 @@
 use anyhow::Result;
 use arancini_lib::processor::decode_bmp_message;
 use arancini_lib::sender::UpdateSender;
-use arancini_lib::state::{synthesize_withdraw_update, State};
+use arancini_lib::state::{State, synthesize_withdraw_update};
 use arancini_lib::state_store::memory::MemoryStore;
 use arancini_lib::state_store::store::StateStore;
-use arancini_lib::update::{decode_updates, new_metadata, Update, UpdateMetadata};
+use arancini_lib::update::{Update, UpdateMetadata, decode_updates, new_metadata};
 use async_nats::jetstream;
 use bgpkit_parser::bmp::messages::{PeerDownNotification, RouteMonitoring};
 use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
@@ -20,8 +20,8 @@ use monoio::io::AsyncReadRent;
 use monoio::net::{ListenerOpts, TcpListener, TcpStream};
 use monoio::time::sleep;
 use monoio::{FusionDriver, RuntimeBuilder};
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -665,8 +665,7 @@ async fn handle_connection<S: UpdateSender>(
 
             trace!(
                 "{}: arancini read BMP packet ({} bytes)",
-                socket,
-                packet_length
+                socket, packet_length
             );
             let mut bytes = frame_buffer.split_to(packet_length).freeze();
             if let Err(err) =
@@ -1472,7 +1471,7 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::{Notify, Semaphore};
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     #[derive(Clone)]
     struct BlockingSender {

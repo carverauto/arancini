@@ -4,8 +4,8 @@ use arancini_lib::update::Update;
 use async_nats::jetstream;
 use crossfire::mpsc;
 use crossfire::{AsyncRxTrait, AsyncTxTrait};
-use futures::stream::{FuturesUnordered, StreamExt};
 use futures::FutureExt;
+use futures::stream::{FuturesUnordered, StreamExt};
 use metrics::{counter, gauge, histogram};
 use std::future::Future;
 use std::net::IpAddr;
@@ -300,7 +300,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::sync::Arc;
     use tokio::sync::mpsc;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     fn test_update(router_addr: IpAddr, prefix_addr: IpAddr, announced: bool) -> Update {
         Update {

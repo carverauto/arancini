@@ -1,7 +1,7 @@
 use anyhow::Result;
 use arancini_lib::update::Update;
-use futures::stream::{FuturesUnordered, StreamExt};
 use futures::FutureExt;
+use futures::stream::{FuturesUnordered, StreamExt};
 use metrics::counter;
 use rdkafka::config::ClientConfig;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};

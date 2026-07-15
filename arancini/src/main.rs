@@ -10,14 +10,14 @@ use anyhow::Result;
 use futures::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{Receiver, channel};
 use tokio_graceful::Shutdown;
 use tracing::{debug, error, trace, warn};
 
 use arancini_lib::update::Update;
 
 use crate::bridge::BridgeSender;
-use crate::config::{configure, AppConfig};
+use crate::config::{AppConfig, configure};
 
 async fn arancini_handler(cfg: Arc<AppConfig>, tx: BridgeSender) {
     if let Err(err) = arancini::spawn_workers(cfg, tx) {

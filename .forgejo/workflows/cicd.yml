@@ -15,7 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
-      - uses: Swatinem/rust-cache@v2
+      # Forgejo's runner cannot create a worktree from rust-cache's annotated v2 tag.
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: |
           cargo check --locked
           cargo test --locked --verbose

@@ -31,8 +31,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
+      # Jobs intentionally run as an unprivileged user. Native build tools are
+      # baked into the reviewed Forgejo CI image rather than installed at runtime.
+      - name: Verify baked native build dependencies
+        run: |
+          command -v capnp
+          command -v pkg-config
+          pkg-config --exists libpcap
+          pkg-config --exists openssl
+          test -f /usr/include/sasl/sasl.h
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

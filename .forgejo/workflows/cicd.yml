@@ -14,7 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
+      # Jobs intentionally run as an unprivileged user. Native build tools are
+      # baked into the reviewed Forgejo CI image rather than installed at runtime.
+      - name: Verify baked native build dependencies
+        run: |
+          command -v capnp
+          command -v pkg-config
+          pkg-config --exists libpcap
+          pkg-config --exists openssl
+          test -f /usr/include/sasl/sasl.h
       # Forgejo's runner cannot create a worktree from rust-cache's annotated v2 tag.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: |
@@ -23,20 +31,15 @@ jobs:
           cargo package -p arancini-lib --locked
 
   docker:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - name: ubuntu-24.04
-            arch: amd64
-          - name: ubuntu-24.04-arm
-            arch: arm64
-
+    # Keep registry credentials off branch and pull-request jobs. The current
+    # Forgejo pool has a reviewed amd64 release runner; add a real arm64 runner
+    # before reintroducing a multi-architecture matrix.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       id-token: write
 
-    runs-on: ${{ matrix.os.name }}
+    runs-on: ubuntu-latest
     needs: [ tests ]
     steps:
       - name: Checkout repository
@@ -44,7 +47,7 @@ jobs:
 
       - name: Prepare
         run: |
-          platform=linux/${{ matrix.os.arch }}
+          platform=linux/amd64
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Log in to the Container registry
@@ -70,7 +73,7 @@ jobs:
           context: .
           push: true
           provenance: false
-          platforms: linux/${{ matrix.os.arch }}
+          platforms: linux/amd64
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
@@ -91,6 +94,7 @@ jobs:
           retention-days: 1
 
   manifests:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       id-token: write
@@ -121,8 +125,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 

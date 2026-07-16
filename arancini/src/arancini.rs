@@ -850,17 +850,17 @@ async fn dump_worker_shard_snapshot_local(
     let state_path = worker_snapshot_path(&cfg.state_path, worker_id);
     let temp_path = format!("{}.tmp", state_path);
     let parent_dir = std::path::Path::new(&state_path).parent();
-    if let Some(parent_dir) = parent_dir {
-        if !parent_dir.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent_dir).map_err(|err| {
-                anyhow::anyhow!(
-                    "arancini worker {} failed to create snapshot dir {}: {}",
-                    worker_id,
-                    parent_dir.display(),
-                    err
-                )
-            })?;
-        }
+    if let Some(parent_dir) = parent_dir
+        && !parent_dir.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent_dir).map_err(|err| {
+            anyhow::anyhow!(
+                "arancini worker {} failed to create snapshot dir {}: {}",
+                worker_id,
+                parent_dir.display(),
+                err
+            )
+        })?;
     }
 
     let snapshot_store = {

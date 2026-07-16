@@ -20,6 +20,7 @@ jobs:
       - run: |
           cargo check --locked
           cargo test --locked --verbose
+          cargo package -p arancini-lib --locked
 
   docker:
     strategy:

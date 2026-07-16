@@ -47,6 +47,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo artifacts
         # Keep this at a commit: the Forgejo runner cannot check out annotated tags.

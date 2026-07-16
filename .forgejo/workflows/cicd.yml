@@ -12,10 +12,15 @@ env:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    # Pin the job image rather than changing an existing persistent runner
+    # identity's reviewed labels. This image is built for unprivileged jobs and
+    # contains the native Arancini prerequisites.
+    container:
+      image: registry.carverauto.dev/serviceradar/forgejo-ci@sha256:cfcb2a27d92a1c4c50474a22b38e3882e7269a58ac3d0f1962792678d759963a
     steps:
       - uses: actions/checkout@v6
       # Jobs intentionally run as an unprivileged user. Native build tools are
-      # baked into the reviewed Forgejo CI image rather than installed at runtime.
+      # baked into the pinned job image rather than installed at runtime.
       - name: Verify baked native build dependencies
         run: |
           command -v capnp

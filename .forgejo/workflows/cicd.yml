@@ -28,6 +28,8 @@ jobs:
           pkg-config --exists libpcap
           pkg-config --exists openssl
           test -f /usr/include/sasl/sasl.h
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
       # Forgejo's runner cannot create a worktree from rust-cache's annotated v2 tag.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: |

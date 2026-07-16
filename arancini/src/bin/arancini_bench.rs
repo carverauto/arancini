@@ -5,7 +5,7 @@ mod update_capnp;
 
 use arancini_lib::state::State;
 use arancini_lib::state_store::memory::MemoryStore;
-use arancini_lib::update::{map_to_ipv6, Update, UpdateAttributes};
+use arancini_lib::update::{Update, UpdateAttributes, map_to_ipv6};
 use bytes::BytesMut;
 use chrono::Utc;
 use core_affinity::CoreId;

@@ -24,6 +24,10 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Keep the release job on the same reviewed non-root image as CI without
+    # altering the persistent runner identity's registered labels.
+    container:
+      image: registry.carverauto.dev/serviceradar/forgejo-ci@sha256:cfcb2a27d92a1c4c50474a22b38e3882e7269a58ac3d0f1962792678d759963a
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
@@ -31,14 +35,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
+      # Jobs intentionally run as an unprivileged user. Native build tools are
+      # baked into the pinned job image rather than installed at runtime.
+      - name: Verify baked native build dependencies
+        run: |
+          command -v capnp
+          command -v pkg-config
+          pkg-config --exists libpcap
+          pkg-config --exists openssl
+          test -f /usr/include/sasl/sasl.h
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        # Keep this at a commit: the Forgejo runner cannot check out annotated tags.
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Validate workspace
         run: |

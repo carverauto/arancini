@@ -7,7 +7,8 @@
 
 ## Publish flow
 
-1. Ensure `arancini/Cargo.toml` workspace version is set to the target release version.
+1. Set the root `Cargo.toml` workspace version and Arancini's `arancini-lib`
+   dependency version to the target release version.
 2. Commit and push changes.
 3. Run Forgejo Actions workflow `Publish Crates`:
    - First run with `dry_run=true`.
@@ -21,4 +22,5 @@ This order is required because `arancini` depends on `arancini-lib`.
 
 ## Tag-based publish
 
-Pushing a tag like `v0.7.1` also triggers the same workflow and performs a real publish.
+Pushing a version tag such as `v0.7.3` also triggers the same workflow and
+performs a real publish.

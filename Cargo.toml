@@ -3,6 +3,8 @@ resolver = "2"
 members = ["arancini", "arancini-lib"]
 
 [workspace.package]
+edition = "2024"
+rust-version = "1.95.0"
 version = "0.7.3"
 license = "MIT"
 readme = "README.md"

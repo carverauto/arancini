@@ -30,7 +30,7 @@ metrics-exporter-prometheus = "0.18.0"
 monoio = { version = "0.2.4", features = ["macros"] }
 num_cpus = "1.17"
 rdkafka = "0.39"
-arancini-lib = { path = "../arancini-lib", version = "0.7.4" }
+arancini-lib = { path = "../arancini-lib", version = "0.7.5" }
 serde = { version = "1", default-features = false,features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.42.0", features = ["full"] }

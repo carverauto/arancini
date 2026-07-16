@@ -93,7 +93,11 @@ jobs:
           ls -lah ${{ runner.temp }}/digests/
 
       - name: Upload digest
-        uses: actions/upload-artifact@v6
+        # Forgejo exposes the GHES-compatible artifact API. The v4+ artifact
+        # actions require the newer GitHub-hosted backend and fail after the
+        # image push, so keep the release handoff on the maintained Node 20
+        # v3 compatibility action.
+        uses: actions/upload-artifact@c6a3b2bd78b3985e4b2f15397fec357f0fd808de # v3.2.2-node20
         with:
           name: digests-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
@@ -110,11 +114,13 @@ jobs:
     needs: [ docker ]
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v7
+        # download-artifact v3 has no v4 `pattern` or `merge-multiple` inputs.
+        # The release currently publishes one reviewed amd64 platform, so its
+        # digest artifact name is deterministic.
+        uses: actions/download-artifact@ad191675b41f6a5b46da9a048cb6893812da158b # v3.1.0-node20
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digests-*
-          merge-multiple: true
+          name: digests-linux-amd64
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3

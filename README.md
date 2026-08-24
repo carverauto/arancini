@@ -4,6 +4,8 @@
 
 **Arancini** is an experimental carrier-grade BGP Monitoring Protocol (BMP) collector designed for ultra-high throughput and sub-millisecond telemetry pipelines. Built on a shared-nothing, thread-per-core architecture, it ingests BMP feeds from routers and streams curated BGP updates to **NATS JetStream**.
 
+Issues, pull requests, and CI live on [GitHub](https://github.com/carverauto/arancini).
+
 Arancini is a high-performance fork of [Risotto](https://github.com/nxthdr/risotto), re-engineered for linear scalability and zero-copy data paths.
 
 ## Key Features

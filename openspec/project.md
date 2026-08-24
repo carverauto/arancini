@@ -28,7 +28,7 @@ This repository contains:
   - Metrics: `metrics` + `metrics-exporter-prometheus`
 - Build/tooling:
   - Cargo workspace with crates `risotto` and `risotto-lib`
-  - GitHub Actions CI (`cargo check --locked`, `cargo test --locked`)
+  - Forgejo Actions CI (`cargo check --locked`, `cargo test --locked`)
   - Docker multi-stage builds using `cargo-chef`
   - Renovate for dependency update automation
 
@@ -104,4 +104,4 @@ This repository contains:
 - Router BMP sources (e.g., GoBGP, BIRD, vendor routers)
 - Prometheus scraper for `/metrics` endpoint
 - Optional downstream consumers (integration setup uses ClickHouse Kafka engine)
-- Container registry publishing via GitHub Container Registry (`ghcr.io`)
+- Container registry publishing via Harbor (`registry.carverauto.dev/serviceradar`)

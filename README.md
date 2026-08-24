@@ -4,6 +4,8 @@
 
 **Arancini** is an experimental carrier-grade BGP Monitoring Protocol (BMP) collector designed for ultra-high throughput and sub-millisecond telemetry pipelines. Built on a shared-nothing, thread-per-core architecture, it ingests BMP feeds from routers and streams curated BGP updates to **NATS JetStream**.
 
+Issues, pull requests, and CI live on [GitHub](https://github.com/carverauto/arancini).
+
 Arancini is a high-performance fork of [Risotto](https://github.com/nxthdr/risotto), re-engineered for linear scalability and zero-copy data paths.
 
 ## Key Features
@@ -20,7 +22,7 @@ Arancini is a high-performance fork of [Risotto](https://github.com/nxthdr/risot
 
 The fastest way to deploy Arancini is via Docker. The following command displays the help menu:
 ```bash
-docker run ghcr.io/carverauto/arancini:v0.7.2 --help
+docker run registry.carverauto.dev/serviceradar/arancini:v0.7.5 --help
 ```
 
 To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
@@ -28,7 +30,7 @@ To run with default parameters (BMP on `:4000`, Metrics on `:8080`):
 docker run \
   -p 4000:4000 \
   -p 8080:8080 \
-  ghcr.io/carverauto/arancini:v0.7.2
+  registry.carverauto.dev/serviceradar/arancini:v0.7.5
 ```
 
 Monitoring is available via the Prometheus endpoint at `http://localhost:8080/metrics`.

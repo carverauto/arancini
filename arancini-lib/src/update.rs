@@ -362,6 +362,15 @@ fn extract_extended_communities(communities: &[MetaCommunity]) -> Vec<(u8, u8, V
                     bgpkit_parser::models::ExtendedCommunity::FlowSpecTrafficMarking(fs) => {
                         Some((type_byte, 0, vec![fs.dscp]))
                     }
+                    bgpkit_parser::models::ExtendedCommunity::LinkBandwidth(lb) => Some((
+                        type_byte,
+                        0x04,
+                        [
+                            &lb.global_admin.to_be_bytes()[..],
+                            &lb.bandwidth.to_be_bytes()[..],
+                        ]
+                        .concat(),
+                    )),
                     bgpkit_parser::models::ExtendedCommunity::Raw(raw) => {
                         Some((raw[0], raw[1], raw[2..].to_vec()))
                     }

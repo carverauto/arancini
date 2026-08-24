@@ -32,14 +32,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev libsasl2-dev libssl-dev capnproto pkg-config
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
+
+      - name: Verify crates.io publishing credential
+        shell: sh
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN must be configured as a GitHub Actions secret on the main environment."
+            exit 1
+          fi
 
       - name: Validate workspace
         run: |

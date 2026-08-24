@@ -4,8 +4,8 @@ members = ["arancini", "arancini-lib"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.95.0"
-version = "0.7.5"
+rust-version = "1.93.0"
+version = "0.7.6"
 license = "MIT"
 readme = "README.md"
 description = "High-performance BMP collector"
